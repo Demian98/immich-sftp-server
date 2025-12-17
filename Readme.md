@@ -1,6 +1,6 @@
 # Immich SFTP Server
 
-Test text
+Test
 
 TODO This project provides an SFTP server that integrates with [Immich](https://github.com/immich-app/immich), enabling users to upload media files directly to their Immich instance via SFTP.
 
