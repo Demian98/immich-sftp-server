@@ -28,7 +28,6 @@ WORKDIR /app
 # Only copy compiled JS code and necessary files from builder
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/cert ./cert
 
 # Install only production dependencies to keep image small
 RUN npm install --omit=dev
