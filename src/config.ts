@@ -11,7 +11,7 @@ function requireEnv(name: string): string {
 function getEnvOrDefault(name: string, defaultValue: string): string {
   const val = process.env[name];
   if (!val) {
-    throw new Error(`Missing required environment variable: ${name}`);
+    return defaultValue;
   }
   return val;
 }

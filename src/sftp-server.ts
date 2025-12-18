@@ -7,6 +7,7 @@ import { VirtualFileSystem } from './virtual-file-system';
 import { JsonFileSystem } from './json-file-system';
 import { ImmichFileSystem } from './immich-file-system';
 import { ensureHostKeySync } from "./ensure-host-key";
+import { config } from './config';
 
 // SFTP Statuscodes
 const STATUS_CODE = {
@@ -23,7 +24,7 @@ interface ImmichSftpConnection extends Connection {
 }
 
 //Generate host key if not exists
-const hostKey = ensureHostKeySync("./cert");
+const hostKey = ensureHostKeySync(config.hostKeyDir);
 
 //Create the SFT Server
 const server = new Server({
