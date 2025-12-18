@@ -153,4 +153,3 @@ Use any SFTP client:
 - If an album contains multiple assets with the **same original filename**, SFTP clients may not handle it well. Technically this is possible in Immich — try to prevent it.
 - You can’t create subfolders, because nested albums are not possible in Immich.
 
----
