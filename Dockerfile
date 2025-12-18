@@ -25,6 +25,9 @@ FROM node:20-alpine
 # Set working directory
 WORKDIR /app
 
+# install ssh-keygen
+RUN apk add --no-cache openssh-keygen
+
 # Only copy compiled JS code and necessary files from builder
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
