@@ -10,21 +10,21 @@ An **SFTP “bridge” for Immich**: browse your Immich albums like folders and 
 - Maybe for backups? (Important and recommended: Do proper backups of the whole Immich instance — see https://docs.immich.app/administration/backup-and-restore/)
 
 
-## Motivation & background 💪🏻
+## Motivation & background 
 
 I’m a Nextcloud user for many years and I’m really happy with it. I have always synchronized my photos and videos with the FolderSync app for Android, which is a very reliable solution, even for large libraries (400 GB+). But no matter what you do, Nextcloud will never get a media management system as good as Immich. At the same time, Immich is still lacking a good two-way synchronization.  
 
 That’s why I came up with this solution. It allows me to reliably sync thousands and tens of thousands of media files with Immich and get reliable reports in the sync app.
 It also allows me to do most of the photo sorting on the phone, which is then reflected in Immich. And if I do some sorting on the computer in Immich, it will be reflected back to the phone.
 
-## Important technical facts ⚙️
+## Important technical facts 
 
 - All actions in this project are **100% based on the official Immich API**. No access to or messing around with Immich internals.
 - **No data or metadata is stored** in this container. So it’s not relevant for your backups, and you can stop using it at any point without data loss.
 
 ---
 
-## How it works (Immich ↔ SFTP mapping) 🧭
+## How it works (Immich ↔ SFTP mapping) ⚙️
 
 ### Albums → folders
 
@@ -42,7 +42,7 @@ The file list you see is completely built from the metadata stored in Immich:
 - **Modified time:** datetime from the asset
 - **Size:** file size of the asset
 
-### Uploads ⬆️
+### Uploads 
 
 Uploading files to SFTP is handled by the following rules:
 
@@ -54,7 +54,7 @@ Uploading files to SFTP is handled by the following rules:
 - Upload a file that was **previously deleted** and is still in the trash
   -  → the asset is **restored from trash** and **added to that album**
 
-### Deleting 🗑️
+### Deleting 
 
 Delete items from your SFTP client:
 
@@ -64,7 +64,7 @@ Delete items from your SFTP client:
 - **Delete an album folder** → the **album is deleted** in Immich  
   > ⚠️ Important: Your SFTP client usually deletes all files inside a folder as well, so assets are also removed according to the rules above. If you could prevent the client from doing so, only the album would be removed, but the assets would not go to the trash.
 
-### Downloads ⬇️
+### Downloads 
 
 Any file can be downloaded from SFTP and you will get the file as it was originally uploaded to Immich.
 
@@ -135,7 +135,7 @@ Use any SFTP client:
 
 ---
 
-## Supported clients 🤝
+## Supported clients 
 
 - FolderSync for Android (https://foldersync.io/)
 - WinSCP (https://winscp.net/)
