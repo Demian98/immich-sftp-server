@@ -28,9 +28,12 @@ It also allows me to do most of the photo sorting on the phone, which is then re
 
 ### Albums → folders
 
-- Root (`/`) lists the albums the user has in Immich.
-- Creating a new folder in SFTP will create a new album in Immich.
-- Add `#nosync` somewhere into an album description in Immich to hide it from SFTP.
+- Root (`/`) now contains virtual folders:
+  - `/all albums`
+  - `/untagged albums`
+  - `/tags`
+  - `/assets without album`
+- Creating a new folder in SFTP under `/all albums` or `/untagged albums` will create a new album in Immich.
 
 ### Assets → files
 
@@ -152,4 +155,3 @@ Use any SFTP client:
   - the same album name is used multiple times
 - If an album contains multiple assets with the **same original filename**, SFTP clients may not handle it well. Technically this is possible in Immich — try to prevent it.
 - You can’t create subfolders, because nested albums are not possible in Immich.
-
