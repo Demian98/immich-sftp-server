@@ -11,12 +11,6 @@ import { DateTime } from 'luxon';
 import isValidFilename from 'valid-filename'; //Achtung, nicht auf v4.0.0 updaten. Ab da wird commjs projekt nicht mehr unterstützt, es geht dann nur noch als ES module.
 
 
-//Nächste themen:
-// [done] Upload von assets die im papierkorb liegen geht nicht
-// eigene func für http requests mit error handling
-// [done] Bei upload hash mitsendne, um upload zu immich von duplicates zu sparen, hash aus tmp file
-
-
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
 
