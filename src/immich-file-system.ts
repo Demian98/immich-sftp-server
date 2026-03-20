@@ -18,6 +18,15 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private albumsCache: ImmichAlbum[] = [];
     private uploadQueue: Array<{ filename: string; tmpFile: tmp.FileResult }> = [];
 
+    private readonly allAlbumsFolder: string = 'all albums';
+    private readonly untaggedAlbumsFolder: string = 'untagged albums';
+    private readonly tagsFolder: string = 'tags';
+    private readonly assetsWithoutAlbumFolder: string = 'assets without album';
+    
+    private readonly tagPrefix: string = '#';
+    private tagsCache: AlbumTag[] = [];
+
+
     async login(username: string, password: string): Promise<void> {
         const loginResp = await this.immichRequest({
             method: 'POST',
@@ -143,18 +152,51 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
     async listFiles(currentDir: string): Promise<Array<{ name: string; isDir: boolean; size: number; mtime: number }>> {
         try {
+            const virtualDir = this.findVirtualDirectory(currentDir);
             if (currentDir == "/") {
-
+                return [
+                    this.createDirEntry(this.allAlbumsFolder),
+                    this.createDirEntry(this.untaggedAlbumsFolder),
+                    this.createDirEntry(this.tagsFolder),
+                    this.createDirEntry(this.assetsWithoutAlbumFolder),
+                ];                
+            }
+            else if (virtualDir == this.allAlbumsFolder) {
                 //Get all albums from Immich API
                 this.albumsCache = await this.fetchAlbums();
 
                 //Map albums to the expected format
-                return this.albumsCache.map((album) => ({
-                    name: album.albumName,
-                    isDir: true,
-                    size: 0,
-                    mtime: 0,
-                }));
+                return this.albumsCache.map((album) => ( this.createDirEntry(album.albumName) ));
+            }
+            else if (virtualDir == this.untaggedAlbumsFolder) {
+                //Get all albums from Immich API
+                this.albumsCache = await this.fetchAlbums();
+                
+                //Find all albums that don't have the tag prefix in their description
+                let untaggedAlbums = this.albumsCache.filter(album => !album.description.includes(this.tagPrefix));
+
+                //Map albums to the expected format
+                return untaggedAlbums.map((album) => ( this.createDirEntry(album.albumName) ));
+            }
+            else if (virtualDir == this.tagsFolder) {
+                //Remove invalid or duplicate names
+                const tags = await this.getAllTagsFromCache(true);
+
+                //Map tags to the expected format
+                return tags.map((tag: AlbumTag) => ( this.createDirEntry(tag.name) ));
+            }
+            else if (virtualDir == this.assetsWithoutAlbumFolder) {
+                //todo
+                return [
+                    this.createDirEntry("todo"),
+                ];
+            }
+            else if (currentDir.startsWith("/" + this.tagsFolder + "/") && currentDir.split("/").length == 3) {
+                //Get tag from cache
+                const tag = await this.getTagFromCache(currentDir, false);
+
+                //Map albums to the expected format
+                return tag.albums.map((album) => ( this.createDirEntry(album.albumName) ));
             }
             else {
                 // Get album and fetch assets
@@ -331,11 +373,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
             description: item.description,
         }));
 
-        // Filter out albums whose description contains "#nosync"
-        let filteredAlbums = albums.filter(album => !album.description?.includes('#nosync'));
+        //todo replace this method by filterFolderNames
 
         // Filter out albums with empty or invalid names
-        filteredAlbums = filteredAlbums.filter(album => isValidFilename(album.albumName));
+        let filteredAlbums = albums.filter(album => isValidFilename(album.albumName));
 
         // Filter out duplicate album names (case-insensitive)
         const seenNames = new Set<string>();
@@ -376,25 +417,54 @@ export class ImmichFileSystem implements VirtualFileSystem {
             }
         });
     }
-    private extractPathInfo(filePath: string): { albumName: string; fileName: string | null } {
+    private extractPathInfo(filePath: string): { albumName: string | null; fileName: string | null, tagName: string | null } {
         // Entfernt führende und doppelte Slashes, z. B. aus "//Pflanzen/..." → "Pflanzen/..."
         const cleanedPath = filePath.replace(/^\/+|\/+$/g, "");
-
         const parts = cleanedPath.split('/').filter(Boolean); // Entfernt leere Segmente
 
-        if (parts.length === 1) {
-            return {
-                albumName: parts[0],
-                fileName: null,
-            };
-        } else if (parts.length === 2) {
-            return {
-                albumName: parts[0],
-                fileName: parts[1],
-            };
-        } else {
-            throw new Error(`Ungültiger Pfad: "${filePath}" – Erwartet 1 oder 2 Segmente.`);
+        if (cleanedPath.startsWith(this.tagsFolder + "/")) {
+            if (parts.length === 2) {
+                return {
+                    tagName: parts[1],
+                    albumName: null,
+                    fileName: null,
+                };
+            } 
+            else if (parts.length === 3) {
+                return {
+                    tagName: parts[1],
+                    albumName: parts[2],
+                    fileName: null,
+                };
+            }
+            else if (parts.length === 4) {
+                return {
+                    tagName: parts[1],
+                    albumName: parts[2],
+                    fileName: parts[3],
+                };
+            } else {
+                throw new Error(`Ungültiger Pfad: "${filePath}" – Erwartet 2, 3, oder 4 Segmente.`);
+            }
         }
+        else {
+            if (parts.length === 2) {
+                return {
+                    tagName: null,
+                    albumName: parts[1],
+                    fileName: null,
+                };
+            } 
+            else if (parts.length === 3) {
+                return {
+                    tagName: null,
+                    albumName: parts[1],
+                    fileName: parts[2],
+                };
+            } else {
+                throw new Error(`Ungültiger Pfad: "${filePath}" – Erwartet 2 oder 3 Segmente.`);
+            }
+        }        
     }
     private async getAlbumFromCache(filename: string, refreshCache: boolean): Promise<ImmichAlbum> {
         const album = await this.getAlbumOrNullFromCache(filename, refreshCache);
@@ -463,6 +533,101 @@ export class ImmichFileSystem implements VirtualFileSystem {
             data: JSON.stringify({ ids: [assetId] }),
             logAction: 'Remove asset from album'
         });
+    }
+
+    private createDirEntry(name: string): { name: string; isDir: boolean; size: number; mtime: number } {
+        return {
+            name,
+            isDir: true,
+            size: 0,
+            mtime: 0,
+        };
+    }
+    private findVirtualDirectory(path: string): string | null {
+        const cleanedPath = path.replace(/^\/+|\/+$/g, "");
+
+        if (cleanedPath === this.allAlbumsFolder) return this.allAlbumsFolder;
+        if (cleanedPath === this.untaggedAlbumsFolder) return this.untaggedAlbumsFolder;
+        if (cleanedPath === this.tagsFolder) return this.tagsFolder;
+        if (cleanedPath === this.assetsWithoutAlbumFolder) return this.assetsWithoutAlbumFolder;
+
+        return null;
+    }    
+    private filterTags(tags: Array<AlbumTag>): Array<AlbumTag> {
+        // Filter out albums with empty or invalid names
+        let filteredTags = tags.filter(tag => isValidFilename(tag.name));
+
+        // Filter out duplicate album names (case-insensitive)
+        const seenNames = new Set<string>();
+        filteredTags = filteredTags.filter(tag => {
+            const lowerName = tag.name.toLowerCase();
+            if (seenNames.has(lowerName)) return false;
+            seenNames.add(lowerName);
+            return true;
+        });
+
+        //Return filtered albums
+        return filteredTags;
+    }
+
+
+
+    private async getAllTagsFromCache(refreshCache: boolean): Promise<AlbumTag[]> {
+        //Todo implement cache refresh
+
+        //Get all albums from Immich API
+        this.albumsCache = await this.fetchAlbums();
+
+        //Find all tags in the album descriptions
+        const tags = new Array<AlbumTag>();
+        this.albumsCache.forEach((album) => {
+            const description = album.description ?? "";
+
+            // (\\S+) means "match one or more non-whitespace characters and capture them as a group".
+            // "g" means "global search", so it will find all matches in the description, not just the first one.
+            const regex = new RegExp(`${this.tagPrefix}(\\S+)`, "g"); 
+
+            let match: RegExpExecArray | null;
+            while ((match = regex.exec(description)) !== null) {                
+                // nur Tagname, ohne Prefix
+                const tagName = match[1];
+                
+                //Find or create tag
+                let tag = tags.find(t => t.name === tagName);
+                if (!tag) {
+                    tag = { name: tagName, albums: [] };
+                    tags.push(tag);
+                }
+
+                //Add current album to the tag
+                tag.albums.push(album);
+            }
+        });
+
+        //Remove invalid or duplicate names
+        const filteredTags = this.filterTags(tags);
+
+        //Build map
+        return filteredTags;    
+    }
+    private async getTagFromCache(filename: string, refreshCache: boolean): Promise<AlbumTag> {
+        const tag = await this.getTagOrNullFromCache(filename, refreshCache);
+        if (!tag) {
+            throw new Error(`Tag not found for filename: ${filename}`);
+        }
+
+        return tag;
+    }
+    private async getTagOrNullFromCache(filename: string, refreshCache: boolean): Promise<AlbumTag | null> {
+        // If albums are not cached, fetch them
+        if (this.albumsCache.length === 0 || refreshCache) {
+            this.albumsCache = await this.fetchAlbums();
+        }
+
+        // Find the tag based on the current directory
+        const folderName = this.extractPathInfo(filename).tagName;
+        const tags = await this.getAllTagsFromCache(false);
+        return tags.find(t => t.name === folderName) || null;
     }
 
 
@@ -539,6 +704,11 @@ interface ImmichAlbum {
     albumName: string;
     description: string;
     assets?: ImmichAsset[];
+}
+
+interface AlbumTag {
+    name: string;
+    albums: ImmichAlbum[];
 }
 
 interface ImmichAsset {
