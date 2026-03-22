@@ -22,9 +22,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private readonly untaggedAlbumsFolder: string = 'untagged albums';
     private readonly tagsFolder: string = 'tags';
     private readonly assetsWithoutAlbumFolder: string = 'assets without album';
-    
     private readonly tagPrefix: string = '#';
-    private tagsCache: AlbumTag[] = [];
 
 
     async login(username: string, password: string): Promise<void> {
@@ -243,33 +241,50 @@ export class ImmichFileSystem implements VirtualFileSystem {
         this.uploadQueue.push({ filename, tmpFile });
     }
     async stat(filename: string): Promise<{ isDir: boolean; size: number; mtime: number; } | null> {
-        // Determine if the path is a directory (album) or a file (asset)
-        const pathInfo = this.extractPathInfo(filename);
+        // Determine if the path is a virtual folder, album or asset
+        const parsedPath = this.parsePath(filename);
 
-        if (pathInfo.fileName === null) {
-            // It's a directory (album)
-            const album = await this.getAlbumOrNullFromCache(filename, true);
-            if (album) {
+        switch (parsedPath.kind) {
+            case "root":
+            case "virtualFolder":
+            case "tagRoot":
+            case "tag":
                 return {
                     isDir: true,
-                    size: 0,    // Albums don't have a size
-                    mtime: 0,   // Albums don't have a modification time
+                    size: 0,
+                    mtime: 0,
                 };
-            }
-            return null; // Album not found
 
-        } else {
-            // It's a file (asset)
-            const asset = await this.getAssetOrNullFromCache(filename, true);
-            if (asset) {
-                return {
-                    isDir: false,
-                    size: asset.fileSizeInByte,
-                    mtime: new Date(asset.fileModifiedAt).getTime() / 1000, // Convert to seconds
-                };
+            case "album":
+            case "tagAlbum": {
+                const album = await this.getAlbumOrNullFromCache(filename, true);
+                if (album) {
+                    return {
+                        isDir: true,
+                        size: 0,    // Albums don't have a size
+                        mtime: 0,   // Albums don't have a modification time
+                    };
+                }
+                return null; // Album not found
             }
-            // Asset not found
-            return null;
+
+            case "asset":
+            case "tagAsset": {
+                const asset = await this.getAssetOrNullFromCache(filename, true);
+                if (asset) {
+                    return {
+                        isDir: false,
+                        size: asset.fileSizeInByte,
+                        mtime: new Date(asset.fileModifiedAt).getTime() / 1000, // Convert to seconds
+                    };
+                }
+                return null; // Asset not found
+            }
+
+            default: {
+                const _exhaustive: never = parsedPath;
+                return _exhaustive;
+            }
         }
     }
     async rename(oldName: string, newName: string): Promise<void> {
@@ -287,35 +302,41 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
     async remove(filename: string): Promise<void> {
 
-        // Check if the path is a file, not a directory
-        const pathInfo = this.extractPathInfo(filename);
+        // Determine if the path is an album or an asset
+        const parsedPath = this.parsePath(filename);
 
-        //Check if it is an album
-        if (pathInfo.albumName != null && pathInfo.fileName == null) {
-            const album = await this.getAlbumFromCache(filename, false);
-            await this.fetchAssetsForAlbum(album);
+        switch (parsedPath.kind) {
+            case "album":
+            case "tagAlbum": {
+                const album = await this.getAlbumFromCache(filename, false);
+                await this.fetchAssetsForAlbum(album);
 
-            //Delete all assets in the album
-            for (const asset of album.assets ?? []) {
-                await this.deleteAsset(album, asset);
+                //Delete all assets in the album
+                for (const asset of album.assets ?? []) {
+                    await this.deleteAsset(album, asset);
+                }
+
+                // Delete the album itself
+                await this.immichRequest({
+                    method: 'DELETE',
+                    endpoint: `albums/${album.id}`,
+                    logAction: 'Delete album'
+                });
+                return;
             }
 
-            // Delete the album itself
-            await this.immichRequest({
-                method: 'DELETE',
-                endpoint: `albums/${album.id}`,
-                logAction: 'Delete album'
-            });
+            case "asset":
+            case "tagAsset": {
+                // Get the album and asset from the cache
+                const album = await this.getAlbumFromCache(filename, false);
+                const asset = await this.getAssetFromCache(filename, false);
 
-        }
+                await this.deleteAsset(album, asset);
+                return;
+            }
 
-        // Check if the path is a file (asset)
-        if (pathInfo.albumName != null && pathInfo.fileName != null) {
-            // Get the album and asset from the cache
-            const album = await this.getAlbumFromCache(filename, false);
-            const asset = await this.getAssetFromCache(filename, false);
-
-            await this.deleteAsset(album, asset);
+            default:
+                throw new Error(`Remove not supported for path: ${filename}`);
         }
     }
     async mkdir(path: string): Promise<void> {
@@ -416,55 +437,73 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 isTrashed: asset.isTrashed,
             }
         });
-    }
-    private extractPathInfo(filePath: string): { albumName: string | null; fileName: string | null, tagName: string | null } {
-        // Entfernt führende und doppelte Slashes, z. B. aus "//Pflanzen/..." → "Pflanzen/..."
+    }   
+    private parsePath(filePath: string): ParsedPath {
+        // Removes leading and trailing slashes, e.g. "//plants/..." -> "plants/..."
         const cleanedPath = filePath.replace(/^\/+|\/+$/g, "");
-        const parts = cleanedPath.split('/').filter(Boolean); // Entfernt leere Segmente
+        const parts = cleanedPath.split('/').filter(Boolean); // Removes empty segments
 
-        if (cleanedPath.startsWith(this.tagsFolder + "/")) {
+        if (parts.length === 0) {
+            return { kind: "root" };
+        }
+
+        if (parts[0] === this.tagsFolder) {
+            if (parts.length === 1) {
+                return { kind: "tagRoot" };
+            }
             if (parts.length === 2) {
                 return {
+                    kind: "tag",
                     tagName: parts[1],
-                    albumName: null,
-                    fileName: null,
-                };
-            } 
-            else if (parts.length === 3) {
-                return {
-                    tagName: parts[1],
-                    albumName: parts[2],
-                    fileName: null,
                 };
             }
-            else if (parts.length === 4) {
+            if (parts.length === 3) {
                 return {
+                    kind: "tagAlbum",
+                    tagName: parts[1],
+                    albumName: parts[2],
+                };
+            }
+            if (parts.length === 4) {
+                return {
+                    kind: "tagAsset",
                     tagName: parts[1],
                     albumName: parts[2],
                     fileName: parts[3],
                 };
-            } else {
-                throw new Error(`Ungültiger Pfad: "${filePath}" – Erwartet 2, 3, oder 4 Segmente.`);
             }
+
+            throw new Error(`UngÃ¼ltiger Pfad: "${filePath}" â€“ Erwartet unter "${this.tagsFolder}" 1, 2, 3 oder 4 Segmente.`);
         }
-        else {
+
+        const virtualFolder = this.findVirtualDirectory(parts[0]);
+        if (virtualFolder) {
+            if (parts.length === 1) {
+                return {
+                    kind: "virtualFolder",
+                    virtualFolder,
+                };
+            }
             if (parts.length === 2) {
                 return {
-                    tagName: null,
+                    kind: "album",
+                    virtualFolder,
                     albumName: parts[1],
-                    fileName: null,
                 };
-            } 
-            else if (parts.length === 3) {
+            }
+            if (parts.length === 3) {
                 return {
-                    tagName: null,
+                    kind: "asset",
+                    virtualFolder,
                     albumName: parts[1],
                     fileName: parts[2],
                 };
-            } else {
-                throw new Error(`Ungültiger Pfad: "${filePath}" – Erwartet 2 oder 3 Segmente.`);
             }
-        }        
+
+            throw new Error(`UngÃ¼ltiger Pfad: "${filePath}" â€“ Erwartet unter "${virtualFolder}" 1, 2 oder 3 Segmente.`);
+        }
+
+        throw new Error(`UngÃ¼ltiger Pfad: "${filePath}"`);
     }
     private async getAlbumFromCache(filename: string, refreshCache: boolean): Promise<ImmichAlbum> {
         const album = await this.getAlbumOrNullFromCache(filename, refreshCache);
@@ -480,9 +519,17 @@ export class ImmichFileSystem implements VirtualFileSystem {
             this.albumsCache = await this.fetchAlbums();
         }
 
-        // Find the album based on the current directory
-        const folderName = this.extractPathInfo(filename).albumName;
-        return this.albumsCache.find(a => a.albumName === folderName) || null;
+        // Find the album based on the parsed path
+        const parsedPath = this.parsePath(filename);
+        switch (parsedPath.kind) {
+            case "album":
+            case "asset":
+            case "tagAlbum":
+            case "tagAsset":
+                return this.albumsCache.find(a => a.albumName === parsedPath.albumName) || null;
+            default:
+                return null;
+        }
     }
     private async getAssetFromCache(filename: string, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset> {
         const asset = await this.getAssetOrNullFromCache(filename, refreshAssetsForThisAlbum);
@@ -502,8 +549,14 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Find the asset in the album based on the original file name
-        const assetFileName = this.extractPathInfo(filename).fileName;
-        return album.assets?.find(a => a.originalFileName === assetFileName) || null;
+        const parsedPath = this.parsePath(filename);
+        switch (parsedPath.kind) {
+            case "asset":
+            case "tagAsset":
+                return album.assets?.find(a => a.originalFileName === parsedPath.fileName) || null;
+            default:
+                return null;
+        }
     }
     private async deleteAsset(album: ImmichAlbum, asset: ImmichAsset): Promise<void> {
         // Check in which albums the asset is used
@@ -624,10 +677,14 @@ export class ImmichFileSystem implements VirtualFileSystem {
             this.albumsCache = await this.fetchAlbums();
         }
 
-        // Find the tag based on the current directory
-        const folderName = this.extractPathInfo(filename).tagName;
+        // Find the tag based on the parsed path
+        const parsedPath = this.parsePath(filename);
+        if (parsedPath.kind !== "tag" && parsedPath.kind !== "tagAlbum" && parsedPath.kind !== "tagAsset") {
+            return null;
+        }
+
         const tags = await this.getAllTagsFromCache(false);
-        return tags.find(t => t.name === folderName) || null;
+        return tags.find(t => t.name === parsedPath.tagName) || null;
     }
 
 
@@ -719,3 +776,13 @@ interface ImmichAsset {
     fileSizeInByte: number;
     isTrashed: boolean;
 }
+
+type ParsedPath =
+    | { kind: "root" }
+    | { kind: "virtualFolder"; virtualFolder: string }
+    | { kind: "tagRoot" }
+    | { kind: "tag"; tagName: string }
+    | { kind: "album"; virtualFolder: string; albumName: string }
+    | { kind: "asset"; virtualFolder: string; albumName: string; fileName: string }
+    | { kind: "tagAlbum"; tagName: string; albumName: string }
+    | { kind: "tagAsset"; tagName: string; albumName: string; fileName: string };
