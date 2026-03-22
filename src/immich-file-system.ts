@@ -150,65 +150,79 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
     async listFiles(currentDir: string): Promise<Array<{ name: string; isDir: boolean; size: number; mtime: number }>> {
         try {
-            const virtualDir = this.findVirtualDirectory(currentDir);
-            if (currentDir == "/") {
-                return [
-                    this.createDirEntry(this.allAlbumsFolder),
-                    this.createDirEntry(this.untaggedAlbumsFolder),
-                    this.createDirEntry(this.tagsFolder),
-                    this.createDirEntry(this.assetsWithoutAlbumFolder),
-                ];                
-            }
-            else if (virtualDir == this.allAlbumsFolder) {
-                //Get all albums from Immich API
-                this.albumsCache = await this.fetchAlbums();
+            const parsedPath = this.parsePath(currentDir);
 
-                //Map albums to the expected format
-                return this.albumsCache.map((album) => ( this.createDirEntry(album.albumName) ));
-            }
-            else if (virtualDir == this.untaggedAlbumsFolder) {
-                //Get all albums from Immich API
-                this.albumsCache = await this.fetchAlbums();
-                
-                //Find all albums that don't have the tag prefix in their description
-                let untaggedAlbums = this.albumsCache.filter(album => !album.description.includes(this.tagPrefix));
+            switch (parsedPath.kind) {
+                case "root":
+                    return [
+                        this.createDirEntry(this.allAlbumsFolder),
+                        this.createDirEntry(this.untaggedAlbumsFolder),
+                        this.createDirEntry(this.tagsFolder),
+                        this.createDirEntry(this.assetsWithoutAlbumFolder),
+                    ];
 
-                //Map albums to the expected format
-                return untaggedAlbums.map((album) => ( this.createDirEntry(album.albumName) ));
-            }
-            else if (virtualDir == this.tagsFolder) {
-                //Remove invalid or duplicate names
-                const tags = await this.getAllTagsFromCache(true);
+                case "virtualFolder":
+                    if (parsedPath.virtualFolder == this.allAlbumsFolder) {
+                        //Get all albums from Immich API
+                        this.albumsCache = await this.fetchAlbums();
 
-                //Map tags to the expected format
-                return tags.map((tag: AlbumTag) => ( this.createDirEntry(tag.name) ));
-            }
-            else if (virtualDir == this.assetsWithoutAlbumFolder) {
-                //todo
-                return [
-                    this.createDirEntry("todo"),
-                ];
-            }
-            else if (currentDir.startsWith("/" + this.tagsFolder + "/") && currentDir.split("/").length == 3) {
-                //Get tag from cache
-                const tag = await this.getTagFromCache(currentDir, false);
+                        //Map albums to the expected format
+                        return this.albumsCache.map((album) => (this.createDirEntry(album.albumName)));
+                    }
+                    else if (parsedPath.virtualFolder == this.untaggedAlbumsFolder) {
+                        //Get all albums from Immich API
+                        this.albumsCache = await this.fetchAlbums();
 
-                //Map albums to the expected format
-                return tag.albums.map((album) => ( this.createDirEntry(album.albumName) ));
-            }
-            else {
-                // Get album and fetch assets
-                const album = await this.getAlbumFromCache(currentDir, false);
-                await this.fetchAssetsForAlbum(album);
+                        //Find all albums that don't have the tag prefix in their description
+                        let untaggedAlbums = this.albumsCache.filter(album => !album.description.includes(this.tagPrefix));
 
-                // Map assets to the expected format
-                return (album.assets ?? []).map((asset) => ({
-                    name: asset.originalFileName,
-                    isDir: false,
-                    size: asset.fileSizeInByte,
-                    mtime: new Date(asset.fileModifiedAt).getTime() / 1000, // Convert to seconds
-                }));
+                        //Map albums to the expected format
+                        return untaggedAlbums.map((album) => (this.createDirEntry(album.albumName)));
+                    }
+                    else if (parsedPath.virtualFolder == this.tagsFolder) {
+                        //Remove invalid or duplicate names
+                        const tags = await this.getAllTagsFromCache(true);
+
+                        //Map tags to the expected format
+                        return tags.map((tag: AlbumTag) => (this.createDirEntry(tag.name)));
+                    }
+                    else if (parsedPath.virtualFolder == this.assetsWithoutAlbumFolder) {
+                        //todo
+                        return [
+                            this.createDirEntry("todo"),
+                        ];
+                    }
+                    break;
+
+                case "tag": {
+                    //Get tag from cache
+                    const tag = await this.getTagFromCache(currentDir, false);
+
+                    //Map albums to the expected format
+                    return tag.albums.map((album) => (this.createDirEntry(album.albumName)));
+                }
+
+                case "album":
+                case "tagAlbum": {
+                    // Get album and fetch assets
+                    const album = await this.getAlbumFromCache(currentDir, false);
+                    await this.fetchAssetsForAlbum(album);
+
+                    // Map assets to the expected format
+                    return (album.assets ?? []).map((asset) => ({
+                        name: asset.originalFileName,
+                        isDir: false,
+                        size: asset.fileSizeInByte,
+                        mtime: new Date(asset.fileModifiedAt).getTime() / 1000, // Convert to seconds
+                    }));
+                }
+
+                case "asset":
+                case "tagAsset":
+                    throw new Error(`Cannot list files for asset path: ${currentDir}`);
             }
+
+            throw new Error(`Unsupported directory path: ${currentDir}`);
         }
         catch (error) {
             console.error("Error fetching albums:", error);
@@ -447,6 +461,12 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         if (parts[0] === this.tagsFolder) {
+            if (parts.length === 1) {
+                return {
+                    kind: "virtualFolder",
+                    virtualFolder: this.tagsFolder,
+                };
+            }
             if (parts.length === 2) {
                 return {
                     kind: "tag",
