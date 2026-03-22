@@ -175,7 +175,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                         this.albumsCache = await this.fetchAlbums();
 
                         //Find all albums that don't have the tag prefix in their description
-                        let untaggedAlbums = this.albumsCache.filter(album => !album.description.includes(this.tagPrefix));
+                        let untaggedAlbums = this.albumsCache.filter(album => !(album.description ?? "").includes(this.tagPrefix));
 
                         //Map albums to the expected format
                         return untaggedAlbums.map((album) => (this.createDirEntry(album.albumName)));
