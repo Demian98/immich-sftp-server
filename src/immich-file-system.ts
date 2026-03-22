@@ -247,7 +247,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
         switch (parsedPath.kind) {
             case "root":
             case "virtualFolder":
-            case "tagRoot":
             case "tag":
                 return {
                     isDir: true,
@@ -448,9 +447,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         if (parts[0] === this.tagsFolder) {
-            if (parts.length === 1) {
-                return { kind: "tagRoot" };
-            }
             if (parts.length === 2) {
                 return {
                     kind: "tag",
@@ -780,7 +776,6 @@ interface ImmichAsset {
 type ParsedPath =
     | { kind: "root" }
     | { kind: "virtualFolder"; virtualFolder: string }
-    | { kind: "tagRoot" }
     | { kind: "tag"; tagName: string }
     | { kind: "album"; virtualFolder: string; albumName: string }
     | { kind: "asset"; virtualFolder: string; albumName: string; fileName: string }
