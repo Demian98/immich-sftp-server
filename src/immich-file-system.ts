@@ -56,7 +56,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Get the album from the cache
-        const album = await this.getAlbumFromCache(filename, false);
+        const parsedPath = this.parsePath(filename);
+        const album = await this.getAlbumFromCache(parsedPath, false);
 
         // Calculate SHA-1 checksum of the buffer
         const hash = crypto.createHash('sha1');
@@ -196,7 +197,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
                 case "tag": {
                     //Get tag from cache
-                    const tag = await this.getTagFromCache(currentDir, false);
+                    const tag = await this.getTagFromCache(parsedPath, false);
 
                     //Map albums to the expected format
                     return tag.albums.map((album) => (this.createDirEntry(album.albumName)));
@@ -205,7 +206,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 case "album":
                 case "tagAlbum": {
                     // Get album and fetch assets
-                    const album = await this.getAlbumFromCache(currentDir, false);
+                    const album = await this.getAlbumFromCache(parsedPath, false);
                     await this.fetchAssetsForAlbum(album);
 
                     // Map assets to the expected format
@@ -233,7 +234,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
         //todo refactor this: Stream not Buffer, Check and refresh cache
 
         // Get the asset from the cache
-        const asset = await this.getAssetFromCache(filename, false);
+        const parsedPath = this.parsePath(filename);
+        const asset = await this.getAssetFromCache(parsedPath, false);
 
         // Fetch the original file as a buffer
         const responseStream: Readable = await this.immichRequest({
@@ -270,7 +272,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
             case "album":
             case "tagAlbum": {
-                const album = await this.getAlbumOrNullFromCache(filename, true);
+                const album = await this.getAlbumOrNullFromCache(parsedPath, true);
                 if (album) {
                     return {
                         isDir: true,
@@ -283,7 +285,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
             case "asset":
             case "tagAsset": {
-                const asset = await this.getAssetOrNullFromCache(filename, true);
+                const asset = await this.getAssetOrNullFromCache(parsedPath, true);
                 if (asset) {
                     return {
                         isDir: false,
@@ -321,7 +323,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         switch (parsedPath.kind) {
             case "album":
             case "tagAlbum": {
-                const album = await this.getAlbumFromCache(filename, false);
+                const album = await this.getAlbumFromCache(parsedPath, false);
                 await this.fetchAssetsForAlbum(album);
 
                 //Delete all assets in the album
@@ -341,8 +343,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
             case "asset":
             case "tagAsset": {
                 // Get the album and asset from the cache
-                const album = await this.getAlbumFromCache(filename, false);
-                const asset = await this.getAssetFromCache(filename, false);
+                const album = await this.getAlbumFromCache(parsedPath, false);
+                const asset = await this.getAssetFromCache(parsedPath, false);
 
                 await this.deleteAsset(album, asset);
                 return;
@@ -521,22 +523,21 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         throw new Error(`UngÃ¼ltiger Pfad: "${filePath}"`);
     }
-    private async getAlbumFromCache(filename: string, refreshCache: boolean): Promise<ImmichAlbum> {
-        const album = await this.getAlbumOrNullFromCache(filename, refreshCache);
+    private async getAlbumFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum> {
+        const album = await this.getAlbumOrNullFromCache(parsedPath, refreshCache);
         if (!album) {
-            throw new Error(`Album not found for filename: ${filename}`);
+            throw new Error(`Album not found for path kind: ${parsedPath.kind}`);
         }
 
         return album;
     }
-    private async getAlbumOrNullFromCache(filename: string, refreshCache: boolean): Promise<ImmichAlbum | null> {
+    private async getAlbumOrNullFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum | null> {
         // If albums are not cached, fetch them
         if (this.albumsCache.length === 0 || refreshCache) {
             this.albumsCache = await this.fetchAlbums();
         }
 
         // Find the album based on the parsed path
-        const parsedPath = this.parsePath(filename);
         switch (parsedPath.kind) {
             case "album":
             case "asset":
@@ -547,16 +548,16 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 return null;
         }
     }
-    private async getAssetFromCache(filename: string, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset> {
-        const asset = await this.getAssetOrNullFromCache(filename, refreshAssetsForThisAlbum);
+    private async getAssetFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset> {
+        const asset = await this.getAssetOrNullFromCache(parsedPath, refreshAssetsForThisAlbum);
         if (asset) {
             return asset;
         }
-        throw new Error(`Asset not found for filename: ${filename}`);
+        throw new Error(`Asset not found for path kind: ${parsedPath.kind}`);
     }
-    private async getAssetOrNullFromCache(filename: string, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset | null> {
+    private async getAssetOrNullFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset | null> {
         //Get the album from the cache
-        const album = await this.getAlbumOrNullFromCache(filename, false);
+        const album = await this.getAlbumOrNullFromCache(parsedPath, false);
         if (!album) return null;
 
         // If the album has no assets, fetch them
@@ -565,7 +566,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Find the asset in the album based on the original file name
-        const parsedPath = this.parsePath(filename);
         switch (parsedPath.kind) {
             case "asset":
             case "tagAsset":
@@ -679,22 +679,21 @@ export class ImmichFileSystem implements VirtualFileSystem {
         //Build map
         return filteredTags;    
     }
-    private async getTagFromCache(filename: string, refreshCache: boolean): Promise<AlbumTag> {
-        const tag = await this.getTagOrNullFromCache(filename, refreshCache);
+    private async getTagFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<AlbumTag> {
+        const tag = await this.getTagOrNullFromCache(parsedPath, refreshCache);
         if (!tag) {
-            throw new Error(`Tag not found for filename: ${filename}`);
+            throw new Error(`Tag not found for path kind: ${parsedPath.kind}`);
         }
 
         return tag;
     }
-    private async getTagOrNullFromCache(filename: string, refreshCache: boolean): Promise<AlbumTag | null> {
+    private async getTagOrNullFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<AlbumTag | null> {
         // If albums are not cached, fetch them
         if (this.albumsCache.length === 0 || refreshCache) {
             this.albumsCache = await this.fetchAlbums();
         }
 
         // Find the tag based on the parsed path
-        const parsedPath = this.parsePath(filename);
         if (parsedPath.kind !== "tag" && parsedPath.kind !== "tagAlbum" && parsedPath.kind !== "tagAsset") {
             return null;
         }
