@@ -526,7 +526,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private async getAlbumFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum> {
         const album = await this.getAlbumOrNullFromCache(parsedPath, refreshCache);
         if (!album) {
-            throw new Error(`Album not found for path kind: ${parsedPath.kind}`);
+            throw new Error(`Album not found for path: ${JSON.stringify(parsedPath)}`);
         }
 
         return album;
@@ -553,7 +553,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         if (asset) {
             return asset;
         }
-        throw new Error(`Asset not found for path kind: ${parsedPath.kind}`);
+        throw new Error(`Asset not found for path: ${JSON.stringify(parsedPath)}`);
     }
     private async getAssetOrNullFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset | null> {
         //Get the album from the cache
@@ -682,7 +682,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private async getTagFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<AlbumTag> {
         const tag = await this.getTagOrNullFromCache(parsedPath, refreshCache);
         if (!tag) {
-            throw new Error(`Tag not found for path kind: ${parsedPath.kind}`);
+            throw new Error(`Tag not found for path: ${JSON.stringify(parsedPath)}`);
         }
 
         return tag;
