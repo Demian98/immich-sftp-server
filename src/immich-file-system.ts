@@ -1,50 +1,29 @@
 import { VirtualFileSystem } from "./virtual-file-system";
-import axios from 'axios';
-import FormData from 'form-data';
 import crypto from 'crypto';
-import { config } from './config';
 import fs from 'fs';
 import tmp from 'tmp';
-import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
-import { DateTime } from 'luxon';
-import isValidFilename from 'valid-filename'; //Achtung, nicht auf v4.0.0 updaten. Ab da wird commjs projekt nicht mehr unterstützt, es geht dann nur noch als ES module.
+import { ImmichService } from './immich-service';
+import { AlbumTag, ParsedPath } from './immich-types';
 
 
 // JSON-basiertes VirtualFileSystem-Backend
 export class ImmichFileSystem implements VirtualFileSystem {
 
-    private immichAccessToken: string = '';
-    private albumsCache: ImmichAlbum[] = [];
+    private readonly immichService: ImmichService = new ImmichService();
     private uploadQueue: Array<{ filename: string; tmpFile: tmp.FileResult }> = [];
 
     private readonly allAlbumsFolder: string = 'all albums';
     private readonly untaggedAlbumsFolder: string = 'untagged albums';
     private readonly tagsFolder: string = 'tags';
     private readonly assetsWithoutAlbumFolder: string = 'assets without album';
-    private readonly tagPrefix: string = '#';
 
 
     async login(username: string, password: string): Promise<void> {
-        const loginResp = await this.immichRequest({
-            method: 'POST',
-            endpoint: 'auth/login',
-            data: JSON.stringify({
-                email: username,
-                password: password,
-            }),
-            logAction: 'Login'
-        });
-
-        // Store the access token
-        this.immichAccessToken = loginResp.accessToken;
+        await this.immichService.login(username, password);
     }
     async logout(): Promise<void> {
-        await this.immichRequest({
-            method: 'POST',
-            endpoint: 'auth/logout',
-            logAction: 'Logout'
-        });
+        await this.immichService.logout();
     }
 
     async setAttributes(filename: string, mtime: number): Promise<void> {
@@ -57,7 +36,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         // Get the album from the cache
         const parsedPath = this.parsePath(filename);
-        const album = await this.getAlbumFromCache(parsedPath, false);
+        const album = await this.immichService.getAlbumFromCache(parsedPath, false);
 
         // Calculate SHA-1 checksum of the buffer
         const hash = crypto.createHash('sha1');
@@ -65,19 +44,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         const checksum = hash.digest('base64');
 
         // Check if the asset already exists using bulk-upload-check
-        const bulkCheckResponse = await this.immichRequest({
-            method: 'POST',
-            endpoint: 'assets/bulk-upload-check',
-            data: JSON.stringify({
-                assets: [
-                    {
-                        checksum: checksum,
-                        id: filename,
-                    }
-                ]
-            }),
-            logAction: 'Bulk upload check'
-        });
+        const bulkCheckResponse = await this.immichService.bulkUploadCheck(filename, checksum);
 
         // Parse response
         const result = bulkCheckResponse.results[0];
@@ -90,26 +57,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         // If the asset doen't exist, upload it
         if (action == "accept") {
 
-            // Prepare form data
-            const data = new FormData();
-            const isoWithOffset = DateTime.fromSeconds(mtime, { zone: config.TZ }).toISO();
-            data.append('fileModifiedAt', isoWithOffset);
-            data.append('fileCreatedAt', isoWithOffset);
-            data.append('deviceAssetId', filename); // Use fileName as deviceAssetId
-            data.append('deviceId', 'immich-sftp-server');
-            data.append('albumId', album.id);
-
-            // Add stream from tmp file
-            const readStream = fs.createReadStream(fileEntry.tmpFile.name);
-            data.append('assetData', readStream, { filename: filename });
-
-            // Send the upload request to Immich
-            const uploadResponse = await this.immichRequest({
-                method: 'POST',
-                endpoint: 'assets',
-                data: data,
-                logAction: 'Upload asset'
-            });
+            const uploadResponse = await this.immichService.uploadAsset(filename, fileEntry.tmpFile.name, mtime, album.id);
 
             // Close tmp file after successful upload
             fileEntry.tmpFile.removeCallback();
@@ -122,31 +70,19 @@ export class ImmichFileSystem implements VirtualFileSystem {
         if (action == "reject" && isTrashed == true) {
 
             //Remove the trashed asset from other albums, in case it has some
-            const assigedAlbums = await this.fetchAlbumsForAssetId(assetId);
+            const assigedAlbums = await this.immichService.fetchAlbumsForAssetId(assetId);
             if (assigedAlbums && assigedAlbums.length > 0) {
                 for (const assigedAlbum of assigedAlbums) {
-                    await this.removeAssetFromAlbum(assigedAlbum, assetId);
+                    await this.immichService.removeAssetFromAlbum(assigedAlbum, assetId);
                 }
             }
 
             //Restore the asset from the trash
-            await this.immichRequest({
-                method: 'POST',
-                endpoint: 'trash/restore/assets',
-                data: JSON.stringify({ ids: [assetId] }),
-                logAction: 'Restore asset'
-            });
+            await this.immichService.restoreAssets([assetId]);
         }
 
         // Add the new asset to the album
-        const addAssetResponse = await this.immichRequest({
-            method: 'PUT',
-            endpoint: `albums/${album.id}/assets`,
-            data: JSON.stringify({
-                ids: [assetId]
-            }),
-            logAction: 'Add asset to album'
-        });
+        await this.immichService.addAssetToAlbum(album.id, assetId);
 
     }
     async listFiles(currentDir: string): Promise<Array<{ name: string; isDir: boolean; size: number; mtime: number }>> {
@@ -165,24 +101,24 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 case "virtualFolder":
                     if (parsedPath.virtualFolder == this.allAlbumsFolder) {
                         //Get all albums from Immich API
-                        this.albumsCache = await this.fetchAlbums();
+                        const albums = await this.immichService.getAllAlbums(false);
 
                         //Map albums to the expected format
-                        return this.albumsCache.map((album) => (this.createDirEntry(album.albumName)));
+                        return albums.map((album) => (this.createDirEntry(album.albumName)));
                     }
                     else if (parsedPath.virtualFolder == this.untaggedAlbumsFolder) {
                         //Get all albums from Immich API
-                        this.albumsCache = await this.fetchAlbums();
+                        const albums = await this.immichService.getAllAlbums(false);
 
                         //Find all albums that don't have the tag prefix in their description
-                        let untaggedAlbums = this.albumsCache.filter(album => !(album.description ?? "").includes(this.tagPrefix));
+                        let untaggedAlbums = albums.filter(album => !(album.description ?? "").includes('#'));
 
                         //Map albums to the expected format
                         return untaggedAlbums.map((album) => (this.createDirEntry(album.albumName)));
                     }
                     else if (parsedPath.virtualFolder == this.tagsFolder) {
                         //Remove invalid or duplicate names
-                        const tags = await this.getAllTagsFromCache(true);
+                        const tags = await this.immichService.getAllTagsFromCache(true);
 
                         //Map tags to the expected format
                         return tags.map((tag: AlbumTag) => (this.createDirEntry(tag.name)));
@@ -197,7 +133,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
                 case "tag": {
                     //Get tag from cache
-                    const tag = await this.getTagFromCache(parsedPath, false);
+                    const tag = await this.immichService.getTagFromCache(parsedPath, false);
 
                     //Map albums to the expected format
                     return tag.albums.map((album) => (this.createDirEntry(album.albumName)));
@@ -206,8 +142,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 case "album":
                 case "tagAlbum": {
                     // Get album and fetch assets
-                    const album = await this.getAlbumFromCache(parsedPath, false);
-                    await this.fetchAssetsForAlbum(album);
+                    const album = await this.immichService.getAlbumFromCache(parsedPath, false);
+                    await this.immichService.fetchAssetsForAlbum(album);
 
                     // Map assets to the expected format
                     return (album.assets ?? []).map((asset) => ({
@@ -235,15 +171,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         // Get the asset from the cache
         const parsedPath = this.parsePath(filename);
-        const asset = await this.getAssetFromCache(parsedPath, false);
+        const asset = await this.immichService.getAssetFromCache(parsedPath, false);
 
         // Fetch the original file as a buffer
-        const responseStream: Readable = await this.immichRequest({
-            method: 'GET',
-            endpoint: `assets/${asset.id}/original`,
-            logAction: 'Download asset',
-            respAsStream: true
-        });
+        const responseStream = await this.immichService.downloadAsset(asset.id);
 
         //Open tmp file stream
         const tmpFile = tmp.fileSync();
@@ -272,7 +203,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
             case "album":
             case "tagAlbum": {
-                const album = await this.getAlbumOrNullFromCache(parsedPath, true);
+                const album = await this.immichService.getAlbumOrNullFromCache(parsedPath, true);
                 if (album) {
                     return {
                         isDir: true,
@@ -285,7 +216,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
             case "asset":
             case "tagAsset": {
-                const asset = await this.getAssetOrNullFromCache(parsedPath, true);
+                const asset = await this.immichService.getAssetOrNullFromCache(parsedPath, true);
                 if (asset) {
                     return {
                         isDir: false,
@@ -323,30 +254,26 @@ export class ImmichFileSystem implements VirtualFileSystem {
         switch (parsedPath.kind) {
             case "album":
             case "tagAlbum": {
-                const album = await this.getAlbumFromCache(parsedPath, false);
-                await this.fetchAssetsForAlbum(album);
+                const album = await this.immichService.getAlbumFromCache(parsedPath, false);
+                await this.immichService.fetchAssetsForAlbum(album);
 
                 //Delete all assets in the album
                 for (const asset of album.assets ?? []) {
-                    await this.deleteAsset(album, asset);
+                    await this.immichService.deleteAsset(album, asset);
                 }
 
                 // Delete the album itself
-                await this.immichRequest({
-                    method: 'DELETE',
-                    endpoint: `albums/${album.id}`,
-                    logAction: 'Delete album'
-                });
+                await this.immichService.deleteAlbum(album.id);
                 return;
             }
 
             case "asset":
             case "tagAsset": {
                 // Get the album and asset from the cache
-                const album = await this.getAlbumFromCache(parsedPath, false);
-                const asset = await this.getAssetFromCache(parsedPath, false);
+                const album = await this.immichService.getAlbumFromCache(parsedPath, false);
+                const asset = await this.immichService.getAssetFromCache(parsedPath, false);
 
-                await this.deleteAsset(album, asset);
+                await this.immichService.deleteAsset(album, asset);
                 return;
             }
 
@@ -362,97 +289,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
         }
 
         // Create a new album in Immich
-        const response = await this.immichRequest({
-            method: 'POST',
-            endpoint: 'albums',
-            data: JSON.stringify({ albumName: cleanedPath }),
-            logAction: 'Create album'
-        });
+        await this.immichService.createAlbum(cleanedPath);
     }
-
-    //Find albums and assets    
-    private async fetchAlbums(): Promise<ImmichAlbum[]> {
-
-        //Parameter "shaerd":
-        // - not set: All albums owned by me, also when shared with other users
-        // - false: only own albums, that are not shared with other users
-        // - true: only shared albums, own and from other users shared with me
-
-        // Fetch albums from Immich API
-        const response = await this.immichRequest({
-            method: 'GET',
-            endpoint: 'albums',
-            logAction: 'All own albums',
-            skipResponseLog: true,
-        });
-
-        //Process and filter albums
-        return this.filterAlbums(response);
-    }
-    private async fetchAlbumsForAssetId(assetId: string): Promise<ImmichAlbum[]> {
-        // Check in which albums the asset is used
-        const response = await this.immichRequest({
-            method: 'GET',
-            endpoint: `albums?assetId=${assetId}`,
-            logAction: 'Albums for assetId',
-            skipResponseLog: true,
-        });
-
-        //Process and filter albums
-        return this.filterAlbums(response);
-    }
-    private filterAlbums(response: any) {
-        // Map response to ImmichAlbum objects
-        const albums: ImmichAlbum[] = response.map((item: any): ImmichAlbum => ({
-            id: item.id,
-            albumName: item.albumName,
-            description: item.description,
-        }));
-
-        //todo replace this method by filterFolderNames
-
-        // Filter out albums with empty or invalid names
-        let filteredAlbums = albums.filter(album => isValidFilename(album.albumName));
-
-        // Filter out duplicate album names (case-insensitive)
-        const seenNames = new Set<string>();
-        filteredAlbums = filteredAlbums.filter(album => {
-            const lowerName = album.albumName.toLowerCase();
-            if (seenNames.has(lowerName)) return false;
-            seenNames.add(lowerName);
-            return true;
-        });
-
-        //Return filtered albums
-        return filteredAlbums;
-    }
-
-    private async fetchAssetsForAlbum(album: ImmichAlbum): Promise<void> {
-        // Fetch assets
-        const response = await this.immichRequest({
-            method: 'GET',
-            endpoint: `albums/${album.id}`,
-            logAction: 'Assets in album',
-            skipResponseLog: true,
-        });
-
-        // Convert to ImmichAsset
-        album.assets = response.assets.map((asset: any): ImmichAsset => {
-            
-            if (!asset.exifInfo?.fileSizeInByte) {
-                console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);                
-            }
-
-            return{
-                id: asset.id,
-                originalFileName: asset.originalFileName,
-                fileCreatedAt: asset.fileCreatedAt,
-                fileModifiedAt: asset.fileModifiedAt,
-                fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
-                isTrashed: asset.isTrashed,
-            }
-        });
-    }   
     private parsePath(filePath: string): ParsedPath {
         // Removes leading and trailing slashes, e.g. "//plants/..." -> "plants/..."
         const cleanedPath = filePath.replace(/^\/+|\/+$/g, "");
@@ -523,87 +361,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         throw new Error(`UngÃ¼ltiger Pfad: "${filePath}"`);
     }
-    private async getAlbumFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum> {
-        const album = await this.getAlbumOrNullFromCache(parsedPath, refreshCache);
-        if (!album) {
-            throw new Error(`Album not found for path: ${JSON.stringify(parsedPath)}`);
-        }
-
-        return album;
-    }
-    private async getAlbumOrNullFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum | null> {
-        // If albums are not cached, fetch them
-        if (this.albumsCache.length === 0 || refreshCache) {
-            this.albumsCache = await this.fetchAlbums();
-        }
-
-        // Find the album based on the parsed path
-        switch (parsedPath.kind) {
-            case "album":
-            case "asset":
-            case "tagAlbum":
-            case "tagAsset":
-                return this.albumsCache.find(a => a.albumName === parsedPath.albumName) || null;
-            default:
-                return null;
-        }
-    }
-    private async getAssetFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset> {
-        const asset = await this.getAssetOrNullFromCache(parsedPath, refreshAssetsForThisAlbum);
-        if (asset) {
-            return asset;
-        }
-        throw new Error(`Asset not found for path: ${JSON.stringify(parsedPath)}`);
-    }
-    private async getAssetOrNullFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset | null> {
-        //Get the album from the cache
-        const album = await this.getAlbumOrNullFromCache(parsedPath, false);
-        if (!album) return null;
-
-        // If the album has no assets, fetch them
-        if ((album.assets?.length ?? 0) === 0 || refreshAssetsForThisAlbum) {
-            await this.fetchAssetsForAlbum(album);
-        }
-
-        // Find the asset in the album based on the original file name
-        switch (parsedPath.kind) {
-            case "asset":
-            case "tagAsset":
-                return album.assets?.find(a => a.originalFileName === parsedPath.fileName) || null;
-            default:
-                return null;
-        }
-    }
-    private async deleteAsset(album: ImmichAlbum, asset: ImmichAsset): Promise<void> {
-        // Check in which albums the asset is used
-        const albumsForAsset = await this.fetchAlbumsForAssetId(asset.id);
-
-        // If the asset is in other albums
-        if (albumsForAsset && albumsForAsset.length > 1) {
-
-            // Remove asset from album
-            await this.removeAssetFromAlbum(album, asset.id);
-        }
-        else {
-            // Asset is used in only 1 or no album, delete it from Immich
-            await this.immichRequest({
-                method: 'DELETE',
-                endpoint: 'assets',
-                data: JSON.stringify({ ids: [asset.id] }),
-                logAction: 'Delete asset'
-            });
-        }
-    }
-    private async removeAssetFromAlbum(album: ImmichAlbum, assetId: string): Promise<void> {
-        // Remove asset from album
-        await this.immichRequest({
-            method: 'DELETE',
-            endpoint: `albums/${album.id}/assets`,
-            data: JSON.stringify({ ids: [assetId] }),
-            logAction: 'Remove asset from album'
-        });
-    }
-
     private createDirEntry(name: string): { name: string; isDir: boolean; size: number; mtime: number } {
         return {
             name,
@@ -621,182 +378,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
         if (cleanedPath === this.assetsWithoutAlbumFolder) return this.assetsWithoutAlbumFolder;
 
         return null;
-    }    
-    private filterTags(tags: Array<AlbumTag>): Array<AlbumTag> {
-        // Filter out albums with empty or invalid names
-        let filteredTags = tags.filter(tag => isValidFilename(tag.name));
-
-        // Filter out duplicate album names (case-insensitive)
-        const seenNames = new Set<string>();
-        filteredTags = filteredTags.filter(tag => {
-            const lowerName = tag.name.toLowerCase();
-            if (seenNames.has(lowerName)) return false;
-            seenNames.add(lowerName);
-            return true;
-        });
-
-        //Return filtered albums
-        return filteredTags;
-    }
-
-
-
-    private async getAllTagsFromCache(refreshCache: boolean): Promise<AlbumTag[]> {
-        //Todo implement cache refresh
-
-        //Get all albums from Immich API
-        this.albumsCache = await this.fetchAlbums();
-
-        //Find all tags in the album descriptions
-        const tags = new Array<AlbumTag>();
-        this.albumsCache.forEach((album) => {
-            const description = album.description ?? "";
-
-            // (\\S+) means "match one or more non-whitespace characters and capture them as a group".
-            // "g" means "global search", so it will find all matches in the description, not just the first one.
-            const regex = new RegExp(`${this.tagPrefix}(\\S+)`, "g"); 
-
-            let match: RegExpExecArray | null;
-            while ((match = regex.exec(description)) !== null) {                
-                // nur Tagname, ohne Prefix
-                const tagName = match[1];
-                
-                //Find or create tag
-                let tag = tags.find(t => t.name === tagName);
-                if (!tag) {
-                    tag = { name: tagName, albums: [] };
-                    tags.push(tag);
-                }
-
-                //Add current album to the tag
-                tag.albums.push(album);
-            }
-        });
-
-        //Remove invalid or duplicate names
-        const filteredTags = this.filterTags(tags);
-
-        //Build map
-        return filteredTags;    
-    }
-    private async getTagFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<AlbumTag> {
-        const tag = await this.getTagOrNullFromCache(parsedPath, refreshCache);
-        if (!tag) {
-            throw new Error(`Tag not found for path: ${JSON.stringify(parsedPath)}`);
-        }
-
-        return tag;
-    }
-    private async getTagOrNullFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<AlbumTag | null> {
-        // If albums are not cached, fetch them
-        if (this.albumsCache.length === 0 || refreshCache) {
-            this.albumsCache = await this.fetchAlbums();
-        }
-
-        // Find the tag based on the parsed path
-        if (parsedPath.kind !== "tag" && parsedPath.kind !== "tagAlbum" && parsedPath.kind !== "tagAsset") {
-            return null;
-        }
-
-        const tags = await this.getAllTagsFromCache(false);
-        return tags.find(t => t.name === parsedPath.tagName) || null;
-    }
-
-
-
-    // Remove trailing slashes from the Immich host URL
-    private readonly baseUrl = config.immichHost.replace(/\/+$/, '');
-    private async immichRequest({ method, endpoint, data, logAction, respAsStream = false, skipResponseLog = false }: { method: 'GET' | 'POST' | 'PUT' | 'DELETE', endpoint: string, data?: any, logAction: string, respAsStream?: boolean, skipResponseLog?: boolean }): Promise<any> {
-        try {
-            console.log(`Sending (${logAction}): ${method} /api/${endpoint}`, this.filterLogData(data));
-
-            const isDownload = method === 'GET' && endpoint.startsWith('assets/') && endpoint.endsWith('/original');
-
-            const response = await axios.request({
-                method: method,
-                url: `${this.baseUrl}/api/${endpoint}`,
-                headers: {
-                    ...(isDownload ? {} : { 'Accept': 'application/json' }),
-                    'User-Agent': 'ImmichSFTP (Linux)',
-                    'Authorization': `Bearer ${this.immichAccessToken}`,
-                    ...(data instanceof FormData ? data.getHeaders?.() : { 'Content-Type': 'application/json' }),
-                },
-                data: data ?? undefined,
-
-                // stream = Streaming requested for download
-                // arraybuffer = Download requested without streaming
-                // json = Default for all other requests
-                responseType: respAsStream ? 'stream' : (isDownload ? 'arraybuffer' : 'json'),
-            });
-
-            //Todo better implementation of logging
-            if (skipResponseLog == true) {
-                console.log(`Received (${logAction}):`, response.status, '[Data skipped]');
-            }
-            else {
-                console.log(`Received (${logAction}):`, response.status, this.filterLogData(response.data));
-            }
-            return response.data;
-        } catch (restoreError) {
-            if (axios.isAxiosError(restoreError)) {
-                console.error(`Axios error (${logAction}):`, restoreError.response?.data || restoreError.message);
-            } else {
-                console.error(`Unknown error during http request (${logAction}):`, restoreError);
-            }
-            throw restoreError;
-        }
-    }
-
-    private filterLogData(data: any): any {
-        // Filter sensitive data from the log
-        if (Buffer.isBuffer(data)) {
-            return '[Binary Data]'; // Mask the binary data as '[Binary Data]'
-        }
-        if (data instanceof Blob) {
-            return '[Blob]';  // For browsers, you can handle Blobs
-        }
-        // Hide FormData contents
-        if (data instanceof FormData) {
-            return '[FormData]';
-        }
-        // Handle edge cases where the data might be large and contain binary-like strings.
-        if (typeof data === 'string' && /[^\x00-\x7F]/.test(data)) {
-            return '[Non-ASCII Text]'; // Mask non-ASCII content as non-readable text
-        }
-        return data; // Return as is if not an object
     }
 
 }
-
-
-
-//Data Classes
-interface ImmichAlbum {
-    id: string;
-    albumName: string;
-    description: string;
-    assets?: ImmichAsset[];
-}
-
-interface AlbumTag {
-    name: string;
-    albums: ImmichAlbum[];
-}
-
-interface ImmichAsset {
-    id: string;
-    originalFileName: string;
-    fileCreatedAt: string;
-    fileModifiedAt: string;
-    fileSizeInByte: number;
-    isTrashed: boolean;
-}
-
-type ParsedPath =
-    | { kind: "root" }
-    | { kind: "virtualFolder"; virtualFolder: string }
-    | { kind: "tag"; tagName: string }
-    | { kind: "album"; virtualFolder: string; albumName: string }
-    | { kind: "asset"; virtualFolder: string; albumName: string; fileName: string }
-    | { kind: "tagAlbum"; tagName: string; albumName: string }
-    | { kind: "tagAsset"; tagName: string; albumName: string; fileName: string };
