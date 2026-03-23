@@ -18,7 +18,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
     private readonly tagsFolder: string = 'tags';
     private readonly assetsWithoutAlbumFolder: string = 'assets without album';
 
-
+    //Session handling    
     async login(username: string, password: string): Promise<void> {
         await this.immichService.login(username, password);
     }
@@ -26,65 +26,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
         await this.immichService.logout();
     }
 
-    async setAttributes(filename: string, mtime: number): Promise<void> {
-
-        // Check if the file exists in the upload queue
-        const fileEntry = this.uploadQueue.find(f => f.filename === filename);
-        if (!fileEntry) {
-            throw new Error(`File not found in upload queue: ${filename}`);
-        }
-
-        // Get the album from the cache
-        const parsedPath = this.parsePath(filename);
-        const album = await this.immichService.getAlbumFromCache(parsedPath, false);
-
-        // Calculate SHA-1 checksum of the buffer
-        const hash = crypto.createHash('sha1');
-        await pipeline(fs.createReadStream(fileEntry.tmpFile.name), hash);
-        const checksum = hash.digest('base64');
-
-        // Check if the asset already exists using bulk-upload-check
-        const bulkCheckResponse = await this.immichService.bulkUploadCheck(filename, checksum);
-
-        // Parse response
-        const result = bulkCheckResponse.results[0];
-        const action = result.action;
-        let assetId = result.assetId;
-        const isTrashed = result.isTrashed;
-        const reason = result.reason;
-        console.log(`Bulk check result for '${filename}': action=${action}, assetId=${assetId}, isTrashed=${isTrashed}, reason=${reason}`);
-
-        // If the asset doen't exist, upload it
-        if (action == "accept") {
-
-            const uploadResponse = await this.immichService.uploadAsset(filename, fileEntry.tmpFile.name, mtime, album.id);
-
-            // Close tmp file after successful upload
-            fileEntry.tmpFile.removeCallback();
-
-            // Get the new asset id
-            assetId = uploadResponse.id;
-        }
-
-        //Restore the asset if it is in the trash
-        if (action == "reject" && isTrashed == true) {
-
-            //Remove the trashed asset from other albums, in case it has some
-            const assigedAlbums = await this.immichService.fetchAlbumsForAssetId(assetId);
-            if (assigedAlbums && assigedAlbums.length > 0) {
-                for (const assigedAlbum of assigedAlbums) {
-                    await this.immichService.removeAssetFromAlbum(assigedAlbum, assetId);
-                }
-            }
-
-            //Restore the asset from the trash
-            await this.immichService.restoreAssets([assetId]);
-        }
-
-        // Add the new asset to the album
-        await this.immichService.addAssetToAlbum(album.id, assetId);
-
-    }
+    
+    //List or get files and directories
     async listFiles(currentDir: string): Promise<Array<{ name: string; isDir: boolean; size: number; mtime: number }>> {
         try {
             const parsedPath = this.parsePath(currentDir);
@@ -184,9 +127,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
         await pipeline(responseStream, writeStream);
         return tmpFile;
     }
-    async writeFile(filename: string, tmpFile: tmp.FileResult): Promise<void> {
-        this.uploadQueue.push({ filename, tmpFile });
-    }
     async stat(filename: string): Promise<{ isDir: boolean; size: number; mtime: number; } | null> {
         // Determine if the path is a virtual folder, album or asset
         const parsedPath = this.parsePath(filename);
@@ -233,6 +173,80 @@ export class ImmichFileSystem implements VirtualFileSystem {
             }
         }
     }
+
+    //Create album and Upload files
+    async mkdir(path: string): Promise<void> {
+        // Only allow creation of folders at level 1 (e.g., "/MyAlbum")
+        const cleanedPath = path.replace(/^\/+|\/+$/g, ""); // Remove leading and trailing slashes
+        if (cleanedPath.includes("/")) {
+            throw new Error("Only top-level folders (albums) can be created.");
+        }
+
+        // Create a new album in Immich
+        await this.immichService.createAlbum(cleanedPath);
+    }
+    async writeFile(filename: string, tmpFile: tmp.FileResult): Promise<void> {
+        this.uploadQueue.push({ filename, tmpFile });
+    }
+    async setAttributes(filename: string, mtime: number): Promise<void> {
+
+        // Check if the file exists in the upload queue
+        const fileEntry = this.uploadQueue.find(f => f.filename === filename);
+        if (!fileEntry) {
+            throw new Error(`File not found in upload queue: ${filename}`);
+        }
+
+        // Get the album from the cache
+        const parsedPath = this.parsePath(filename);
+        const album = await this.immichService.getAlbumFromCache(parsedPath, false);
+
+        // Calculate SHA-1 checksum of the buffer
+        const hash = crypto.createHash('sha1');
+        await pipeline(fs.createReadStream(fileEntry.tmpFile.name), hash);
+        const checksum = hash.digest('base64');
+
+        // Check if the asset already exists using bulk-upload-check
+        const bulkCheckResponse = await this.immichService.bulkUploadCheck(filename, checksum);
+
+        // Parse response
+        const result = bulkCheckResponse.results[0];
+        const action = result.action;
+        let assetId = result.assetId;
+        const isTrashed = result.isTrashed;
+        const reason = result.reason;
+        console.log(`Bulk check result for '${filename}': action=${action}, assetId=${assetId}, isTrashed=${isTrashed}, reason=${reason}`);
+
+        // If the asset doen't exist, upload it
+        if (action == "accept") {
+
+            const uploadResponse = await this.immichService.uploadAsset(filename, fileEntry.tmpFile.name, mtime, album.id);
+
+            // Close tmp file after successful upload
+            fileEntry.tmpFile.removeCallback();
+
+            // Get the new asset id
+            assetId = uploadResponse.id;
+        }
+
+        //Restore the asset if it is in the trash
+        if (action == "reject" && isTrashed == true) {
+
+            //Remove the trashed asset from other albums, in case it has some
+            const assigedAlbums = await this.immichService.fetchAlbumsForAssetId(assetId);
+            if (assigedAlbums && assigedAlbums.length > 0) {
+                for (const assigedAlbum of assigedAlbums) {
+                    await this.immichService.removeAssetFromAlbum(assigedAlbum, assetId);
+                }
+            }
+
+            //Restore the asset from the trash
+            await this.immichService.restoreAssets([assetId]);
+        }
+
+        // Add the new asset to the album
+        await this.immichService.addAssetToAlbum(album.id, assetId);
+
+    }
     async rename(oldName: string, newName: string): Promise<void> {
         // Check if the file exists in the upload queue
         const fileIndex = this.uploadQueue.findIndex(f => f.filename === oldName);
@@ -246,6 +260,8 @@ export class ImmichFileSystem implements VirtualFileSystem {
         //File not found
         throw new Error("Rename not support for Immich backend. Expect for tmp files (files that have been upload with OPEN, WRITE, CLOSE, but not jet sent to Immich in SETSTAT).");
     }
+
+    //Delete files or albums
     async remove(filename: string): Promise<void> {
 
         // Determine if the path is an album or an asset
@@ -281,15 +297,17 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 throw new Error(`Remove not supported for path: ${filename}`);
         }
     }
-    async mkdir(path: string): Promise<void> {
-        // Only allow creation of folders at level 1 (e.g., "/MyAlbum")
-        const cleanedPath = path.replace(/^\/+|\/+$/g, ""); // Remove leading and trailing slashes
-        if (cleanedPath.includes("/")) {
-            throw new Error("Only top-level folders (albums) can be created.");
-        }
 
-        // Create a new album in Immich
-        await this.immichService.createAlbum(cleanedPath);
+    //Helpers
+    private findVirtualDirectory(path: string): string | null {
+        const cleanedPath = path.replace(/^\/+|\/+$/g, "");
+
+        if (cleanedPath === this.allAlbumsFolder) return this.allAlbumsFolder;
+        if (cleanedPath === this.untaggedAlbumsFolder) return this.untaggedAlbumsFolder;
+        if (cleanedPath === this.tagsFolder) return this.tagsFolder;
+        if (cleanedPath === this.assetsWithoutAlbumFolder) return this.assetsWithoutAlbumFolder;
+
+        return null;
     }
     private parsePath(filePath: string): ParsedPath {
         // Removes leading and trailing slashes, e.g. "//plants/..." -> "plants/..."
@@ -368,16 +386,6 @@ export class ImmichFileSystem implements VirtualFileSystem {
             size: 0,
             mtime: 0,
         };
-    }
-    private findVirtualDirectory(path: string): string | null {
-        const cleanedPath = path.replace(/^\/+|\/+$/g, "");
-
-        if (cleanedPath === this.allAlbumsFolder) return this.allAlbumsFolder;
-        if (cleanedPath === this.untaggedAlbumsFolder) return this.untaggedAlbumsFolder;
-        if (cleanedPath === this.tagsFolder) return this.tagsFolder;
-        if (cleanedPath === this.assetsWithoutAlbumFolder) return this.assetsWithoutAlbumFolder;
-
-        return null;
     }
 
 }
