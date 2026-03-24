@@ -9,10 +9,14 @@ import { AlbumTag, ImmichAlbum, ImmichAsset, ParsedPath } from './immich-types';
 
 export class ImmichService {
 
+    // Remove trailing slashes from the Immich host URL
+    private readonly baseUrl = config.immichHost.replace(/\/+$/, '');
     private immichAccessToken: string = '';
     private albumsCache: ImmichAlbum[] = [];
     private readonly tagPrefix: string = '#';
 
+
+    //Session handling
     async login(username: string, password: string): Promise<void> {
         const loginResp = await this.immichRequest({
             method: 'POST',
@@ -35,6 +39,7 @@ export class ImmichService {
         });
     }
 
+    //Upload assets
     async bulkUploadCheck(filename: string, checksum: string): Promise<any> {
         return await this.immichRequest({
             method: 'POST',
@@ -72,14 +77,6 @@ export class ImmichService {
             logAction: 'Upload asset'
         });
     }
-    async restoreAssets(assetIds: string[]): Promise<void> {
-        await this.immichRequest({
-            method: 'POST',
-            endpoint: 'trash/restore/assets',
-            data: JSON.stringify({ ids: assetIds }),
-            logAction: 'Restore asset'
-        });
-    }
     async addAssetToAlbum(albumId: string, assetId: string): Promise<void> {
         await this.immichRequest({
             method: 'PUT',
@@ -90,6 +87,8 @@ export class ImmichService {
             logAction: 'Add asset to album'
         });
     }
+
+    //Download assets
     async downloadAsset(assetId: string): Promise<Readable> {
         return await this.immichRequest({
             method: 'GET',
@@ -98,21 +97,8 @@ export class ImmichService {
             respAsStream: true
         });
     }
-    async deleteAlbum(albumId: string): Promise<void> {
-        await this.immichRequest({
-            method: 'DELETE',
-            endpoint: `albums/${albumId}`,
-            logAction: 'Delete album'
-        });
-    }
-    async createAlbum(albumName: string): Promise<void> {
-        await this.immichRequest({
-            method: 'POST',
-            endpoint: 'albums',
-            data: JSON.stringify({ albumName: albumName }),
-            logAction: 'Create album'
-        });
-    }
+
+    //Get Albums
     async getAllAlbums(refreshCache: boolean): Promise<ImmichAlbum[]> {
         if (this.albumsCache.length === 0 || refreshCache) {
             this.albumsCache = await this.fetchAlbums();
@@ -120,8 +106,6 @@ export class ImmichService {
 
         return this.albumsCache;
     }
-
-    //Find albums and assets
     private async fetchAlbums(): Promise<ImmichAlbum[]> {
 
         //Parameter "shaerd":
@@ -139,70 +123,6 @@ export class ImmichService {
 
         //Process and filter albums
         return this.filterAlbums(response);
-    }
-    async fetchAlbumsForAssetId(assetId: string): Promise<ImmichAlbum[]> {
-        // Check in which albums the asset is used
-        const response = await this.immichRequest({
-            method: 'GET',
-            endpoint: `albums?assetId=${assetId}`,
-            logAction: 'Albums for assetId',
-            skipResponseLog: true,
-        });
-
-        //Process and filter albums
-        return this.filterAlbums(response);
-    }
-    private filterAlbums(response: any) {
-        // Map response to ImmichAlbum objects
-        const albums: ImmichAlbum[] = response.map((item: any): ImmichAlbum => ({
-            id: item.id,
-            albumName: item.albumName,
-            description: item.description,
-        }));
-
-        //todo replace this method by filterFolderNames
-
-        // Filter out albums with empty or invalid names
-        let filteredAlbums = albums.filter(album => isValidFilename(album.albumName));
-
-        // Filter out duplicate album names (case-insensitive)
-        const seenNames = new Set<string>();
-        filteredAlbums = filteredAlbums.filter(album => {
-            const lowerName = album.albumName.toLowerCase();
-            if (seenNames.has(lowerName)) return false;
-            seenNames.add(lowerName);
-            return true;
-        });
-
-        //Return filtered albums
-        return filteredAlbums;
-    }
-
-    async fetchAssetsForAlbum(album: ImmichAlbum): Promise<void> {
-        // Fetch assets
-        const response = await this.immichRequest({
-            method: 'GET',
-            endpoint: `albums/${album.id}`,
-            logAction: 'Assets in album',
-            skipResponseLog: true,
-        });
-
-        // Convert to ImmichAsset
-        album.assets = response.assets.map((asset: any): ImmichAsset => {
-
-            if (!asset.exifInfo?.fileSizeInByte) {
-                console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);
-            }
-
-            return {
-                id: asset.id,
-                originalFileName: asset.originalFileName,
-                fileCreatedAt: asset.fileCreatedAt,
-                fileModifiedAt: asset.fileModifiedAt,
-                fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
-                isTrashed: asset.isTrashed,
-            }
-        });
     }
     async getAlbumFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum> {
         const album = await this.getAlbumOrNullFromCache(parsedPath, refreshCache);
@@ -229,6 +149,70 @@ export class ImmichService {
                 return null;
         }
     }
+    private filterAlbums(response: any) {
+        // Map response to ImmichAlbum objects
+        const albums: ImmichAlbum[] = response.map((item: any): ImmichAlbum => ({
+            id: item.id,
+            albumName: item.albumName,
+            description: item.description,
+        }));
+
+        //todo replace this method by filterFolderNames
+
+        // Filter out albums with empty or invalid names
+        let filteredAlbums = albums.filter(album => isValidFilename(album.albumName));
+
+        // Filter out duplicate album names (case-insensitive)
+        const seenNames = new Set<string>();
+        filteredAlbums = filteredAlbums.filter(album => {
+            const lowerName = album.albumName.toLowerCase();
+            if (seenNames.has(lowerName)) return false;
+            seenNames.add(lowerName);
+            return true;
+        });
+
+        //Return filtered albums
+        return filteredAlbums;
+    }
+    async fetchAlbumsForAssetId(assetId: string): Promise<ImmichAlbum[]> {
+        // Check in which albums the asset is used
+        const response = await this.immichRequest({
+            method: 'GET',
+            endpoint: `albums?assetId=${assetId}`,
+            logAction: 'Albums for assetId',
+            skipResponseLog: true,
+        });
+
+        //Process and filter albums
+        return this.filterAlbums(response);
+    }
+
+    //Maintain albums
+    async restoreAssets(assetIds: string[]): Promise<void> {
+        await this.immichRequest({
+            method: 'POST',
+            endpoint: 'trash/restore/assets',
+            data: JSON.stringify({ ids: assetIds }),
+            logAction: 'Restore asset'
+        });
+    }
+    async deleteAlbum(albumId: string): Promise<void> {
+        await this.immichRequest({
+            method: 'DELETE',
+            endpoint: `albums/${albumId}`,
+            logAction: 'Delete album'
+        });
+    }
+    async createAlbum(albumName: string): Promise<void> {
+        await this.immichRequest({
+            method: 'POST',
+            endpoint: 'albums',
+            data: JSON.stringify({ albumName: albumName }),
+            logAction: 'Create album'
+        });
+    }
+
+    //Get Assets
     async getAssetFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset> {
         const asset = await this.getAssetOrNullFromCache(parsedPath, refreshAssetsForThisAlbum);
         if (asset) {
@@ -255,6 +239,43 @@ export class ImmichService {
                 return null;
         }
     }
+    async fetchAssetsForAlbum(album: ImmichAlbum): Promise<void> {
+        // Fetch assets
+        const response = await this.immichRequest({
+            method: 'GET',
+            endpoint: `albums/${album.id}`,
+            logAction: 'Assets in album',
+            skipResponseLog: true,
+        });
+
+        // Convert to ImmichAsset
+        album.assets = response.assets.map((asset: any): ImmichAsset => {
+
+            if (!asset.exifInfo?.fileSizeInByte) {
+                console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);
+            }
+
+            return {
+                id: asset.id,
+                originalFileName: asset.originalFileName,
+                fileCreatedAt: asset.fileCreatedAt,
+                fileModifiedAt: asset.fileModifiedAt,
+                fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
+                isTrashed: asset.isTrashed,
+            }
+        });
+    }
+
+    //Maintain assets
+    async removeAssetFromAlbum(album: ImmichAlbum, assetId: string): Promise<void> {
+        // Remove asset from album
+        await this.immichRequest({
+            method: 'DELETE',
+            endpoint: `albums/${album.id}/assets`,
+            data: JSON.stringify({ ids: [assetId] }),
+            logAction: 'Remove asset from album'
+        });
+    }
     async deleteAsset(album: ImmichAlbum, asset: ImmichAsset): Promise<void> {
         // Check in which albums the asset is used
         const albumsForAsset = await this.fetchAlbumsForAssetId(asset.id);
@@ -275,33 +296,8 @@ export class ImmichService {
             });
         }
     }
-    async removeAssetFromAlbum(album: ImmichAlbum, assetId: string): Promise<void> {
-        // Remove asset from album
-        await this.immichRequest({
-            method: 'DELETE',
-            endpoint: `albums/${album.id}/assets`,
-            data: JSON.stringify({ ids: [assetId] }),
-            logAction: 'Remove asset from album'
-        });
-    }
 
-    private filterTags(tags: Array<AlbumTag>): Array<AlbumTag> {
-        // Filter out albums with empty or invalid names
-        let filteredTags = tags.filter(tag => isValidFilename(tag.name));
-
-        // Filter out duplicate album names (case-insensitive)
-        const seenNames = new Set<string>();
-        filteredTags = filteredTags.filter(tag => {
-            const lowerName = tag.name.toLowerCase();
-            if (seenNames.has(lowerName)) return false;
-            seenNames.add(lowerName);
-            return true;
-        });
-
-        //Return filtered albums
-        return filteredTags;
-    }
-
+    //Get Tags
     async getAllTagsFromCache(refreshCache: boolean): Promise<AlbumTag[]> {
         //Todo implement cache refresh
 
@@ -362,9 +358,25 @@ export class ImmichService {
         const tags = await this.getAllTagsFromCache(false);
         return tags.find(t => t.name === parsedPath.tagName) || null;
     }
+    private filterTags(tags: Array<AlbumTag>): Array<AlbumTag> {
+        // Filter out albums with empty or invalid names
+        let filteredTags = tags.filter(tag => isValidFilename(tag.name));
 
-    // Remove trailing slashes from the Immich host URL
-    private readonly baseUrl = config.immichHost.replace(/\/+$/, '');
+        // Filter out duplicate album names (case-insensitive)
+        const seenNames = new Set<string>();
+        filteredTags = filteredTags.filter(tag => {
+            const lowerName = tag.name.toLowerCase();
+            if (seenNames.has(lowerName)) return false;
+            seenNames.add(lowerName);
+            return true;
+        });
+
+        //Return filtered albums
+        return filteredTags;
+    }
+
+
+    //Execute requests
     private async immichRequest({ method, endpoint, data, logAction, respAsStream = false, skipResponseLog = false }: { method: 'GET' | 'POST' | 'PUT' | 'DELETE', endpoint: string, data?: any, logAction: string, respAsStream?: boolean, skipResponseLog?: boolean }): Promise<any> {
         try {
             console.log(`Sending (${logAction}): ${method} /api/${endpoint}`, this.filterLogData(data));
@@ -405,7 +417,6 @@ export class ImmichService {
             throw restoreError;
         }
     }
-
     private filterLogData(data: any): any {
         // Filter sensitive data from the log
         if (Buffer.isBuffer(data)) {
