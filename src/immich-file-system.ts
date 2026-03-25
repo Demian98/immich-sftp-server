@@ -1,5 +1,4 @@
 import { VirtualFileSystem } from "./virtual-file-system";
-import crypto from 'crypto';
 import fs from 'fs';
 import tmp from 'tmp';
 import { pipeline } from 'stream/promises';
@@ -196,56 +195,11 @@ export class ImmichFileSystem implements VirtualFileSystem {
             throw new Error(`File not found in upload queue: ${filename}`);
         }
 
-        // Get the album from the cache
+        // Parse the path for the upload target
         const parsedPath = this.parsePath(filename);
-        const album = await this.immichService.getAlbumFromCache(parsedPath, false);
 
-        // Calculate SHA-1 checksum of the buffer
-        const hash = crypto.createHash('sha1');
-        await pipeline(fs.createReadStream(fileEntry.tmpFile.name), hash);
-        const checksum = hash.digest('base64');
-
-        // Check if the asset already exists using bulk-upload-check
-        const bulkCheckResponse = await this.immichService.bulkUploadCheck(filename, checksum);
-
-        // Parse response
-        const result = bulkCheckResponse.results[0];
-        const action = result.action;
-        let assetId = result.assetId;
-        const isTrashed = result.isTrashed;
-        const reason = result.reason;
-        console.log(`Bulk check result for '${filename}': action=${action}, assetId=${assetId}, isTrashed=${isTrashed}, reason=${reason}`);
-
-        // If the asset doen't exist, upload it
-        if (action == "accept") {
-
-            const uploadResponse = await this.immichService.uploadAsset(filename, fileEntry.tmpFile.name, mtime, album.id);
-
-            // Close tmp file after successful upload
-            fileEntry.tmpFile.removeCallback();
-
-            // Get the new asset id
-            assetId = uploadResponse.id;
-        }
-
-        //Restore the asset if it is in the trash
-        if (action == "reject" && isTrashed == true) {
-
-            //Remove the trashed asset from other albums, in case it has some
-            const assigedAlbums = await this.immichService.fetchAlbumsForAssetId(assetId);
-            if (assigedAlbums && assigedAlbums.length > 0) {
-                for (const assigedAlbum of assigedAlbums) {
-                    await this.immichService.removeAssetFromAlbum(assigedAlbum, assetId);
-                }
-            }
-
-            //Restore the asset from the trash
-            await this.immichService.restoreAssets([assetId]);
-        }
-
-        // Add the new asset to the album
-        await this.immichService.addAssetToAlbum(album.id, assetId);
-
+        // Let the service handle the full upload finalization flow
+        await this.immichService.uploadAssetToAlbum(parsedPath, filename, fileEntry.tmpFile, mtime);
     }
     async rename(oldName: string, newName: string): Promise<void> {
         // Check if the file exists in the upload queue

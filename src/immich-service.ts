@@ -1,6 +1,9 @@
 import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
+import tmp from 'tmp';
+import crypto from 'crypto';
+import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 import { DateTime } from 'luxon';
 import isValidFilename from 'valid-filename'; //Achtung, nicht auf v4.0.0 updaten. Ab da wird commjs projekt nicht mehr unterstÃ¼tzt, es geht dann nur noch als ES module.
@@ -40,7 +43,57 @@ export class ImmichService {
     }
 
     //Upload assets
-    async bulkUploadCheck(filename: string, checksum: string): Promise<any> {
+    async uploadAssetToAlbum(parsedPath: ParsedPath, filename: string, tmpFile: tmp.FileResult, mtime: number): Promise<void> {
+        // Calculate SHA-1 checksum of the buffer
+        const hash = crypto.createHash('sha1');
+        await pipeline(fs.createReadStream(tmpFile.name), hash);
+        const checksum = hash.digest('base64');
+
+        // Check if the asset already exists using bulk-upload-check
+        const bulkCheckResponse = await this.bulkUploadCheck(filename, checksum);
+
+        // Parse response
+        const result = bulkCheckResponse.results[0];
+        const action = result.action;
+        let assetId = result.assetId;
+        const isTrashed = result.isTrashed;
+        const reason = result.reason;
+        console.log(`Bulk check result for '${filename}': action=${action}, assetId=${assetId}, isTrashed=${isTrashed}, reason=${reason}`);
+        
+        // Get the album from the cache
+        const album = await this.getAlbumFromCache(parsedPath, false);
+        
+        // If the asset doen't exist, upload it
+        if (action == "accept") {
+
+            const uploadResponse = await this.createAsset(filename, tmpFile.name, mtime, album.id);
+
+            // Close tmp file after successful upload
+            tmpFile.removeCallback();
+
+            // Get the new asset id
+            assetId = uploadResponse.id;
+        }
+
+        //Restore the asset if it is in the trash
+        if (action == "reject" && isTrashed == true) {
+
+            //Remove the trashed asset from other albums, in case it has some
+            const assigedAlbums = await this.fetchAlbumsForAssetId(assetId);
+            if (assigedAlbums && assigedAlbums.length > 0) {
+                for (const assigedAlbum of assigedAlbums) {
+                    await this.removeAssetFromAlbum(assigedAlbum, assetId);
+                }
+            }
+
+            //Restore the asset from the trash
+            await this.restoreAssets([assetId]);
+        }
+
+        // Add the new asset to the album
+        await this.addAssetToAlbum(album.id, assetId);
+    }
+    private async bulkUploadCheck(filename: string, checksum: string): Promise<any> {
         return await this.immichRequest({
             method: 'POST',
             endpoint: 'assets/bulk-upload-check',
@@ -55,7 +108,7 @@ export class ImmichService {
             logAction: 'Bulk upload check'
         });
     }
-    async uploadAsset(filename: string, tmpFilePath: string, mtime: number, albumId: string): Promise<any> {
+    private async createAsset(filename: string, tmpFilePath: string, mtime: number, albumId: string): Promise<any> {
         // Prepare form data
         const data = new FormData();
         const isoWithOffset = DateTime.fromSeconds(mtime, { zone: config.TZ }).toISO();
@@ -77,7 +130,7 @@ export class ImmichService {
             logAction: 'Upload asset'
         });
     }
-    async addAssetToAlbum(albumId: string, assetId: string): Promise<void> {
+    private async addAssetToAlbum(albumId: string, assetId: string): Promise<void> {
         await this.immichRequest({
             method: 'PUT',
             endpoint: `albums/${albumId}/assets`,
@@ -174,7 +227,7 @@ export class ImmichService {
         //Return filtered albums
         return filteredAlbums;
     }
-    async fetchAlbumsForAssetId(assetId: string): Promise<ImmichAlbum[]> {
+    private async fetchAlbumsForAssetId(assetId: string): Promise<ImmichAlbum[]> {
         // Check in which albums the asset is used
         const response = await this.immichRequest({
             method: 'GET',
@@ -188,7 +241,7 @@ export class ImmichService {
     }
 
     //Maintain albums
-    async restoreAssets(assetIds: string[]): Promise<void> {
+    private async restoreAssets(assetIds: string[]): Promise<void> {
         await this.immichRequest({
             method: 'POST',
             endpoint: 'trash/restore/assets',
@@ -267,7 +320,7 @@ export class ImmichService {
     }
 
     //Maintain assets
-    async removeAssetFromAlbum(album: ImmichAlbum, assetId: string): Promise<void> {
+    private async removeAssetFromAlbum(album: ImmichAlbum, assetId: string): Promise<void> {
         // Remove asset from album
         await this.immichRequest({
             method: 'DELETE',
