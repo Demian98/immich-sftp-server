@@ -63,10 +63,14 @@ export class ImmichFileSystem implements VirtualFileSystem {
                         return tags.map((tag) => (this.createDirEntry(tag.name)));
                     }
                     else if (parsedPath.virtualFolder == this.assetsWithoutAlbumFolder) {
-                        //todo
-                        return [
-                            this.createDirEntry("todo"),
-                        ];
+                        const assetsWithoutAlbum = await this.immichService.getAssetsWithoutAlbum(false);
+
+                        return assetsWithoutAlbum.map((asset) => ({
+                            name: asset.originalFileName,
+                            isDir: false,
+                            size: asset.fileSizeInByte,
+                            mtime: new Date(asset.fileModifiedAt).getTime() / 1000, // Convert to seconds
+                        }));
                     }
                     break;
 
@@ -93,6 +97,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 }
 
                 case "asset":
+                case "assetWithoutAlbum":
                 case "tagAsset":
                     throw new Error(`Cannot list files for asset path: ${currentDir}`);
             }
@@ -150,6 +155,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             }
 
             case "asset":
+            case "assetWithoutAlbum":
             case "tagAsset": {
                 const asset = await this.immichService.getAssetOrNullFromCache(parsedPath, true);
                 if (asset) {
@@ -234,14 +240,21 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
             case "asset":
             case "tagAsset": {
-                // Get the album and asset from the cache
-                const album = await this.immichService.getAlbumFromCache(parsedPath, false);
+                //Get asset and album from cache
                 const asset = await this.immichService.getAssetFromCache(parsedPath, false);
+                const album = await this.immichService.getAlbumFromCache(parsedPath, false);
 
+                // Delete the asset
                 await this.immichService.deleteAsset(album, asset);
                 return;
             }
 
+            case "assetWithoutAlbum": {
+                //Find asset and delete it
+                const asset = await this.immichService.getAssetFromCache(parsedPath, false);
+                await this.immichService.deleteAsset(null, asset);
+                return;
+            }   
             default:
                 throw new Error(`Remove not supported for path: ${filename}`);
         }
@@ -297,6 +310,23 @@ export class ImmichFileSystem implements VirtualFileSystem {
             }
 
             throw new Error(`UngÃ¼ltiger Pfad: "${filePath}" â€“ Erwartet unter "${this.tagsFolder}" 1, 2, 3 oder 4 Segmente.`);
+        }
+
+        if (parts[0] === this.assetsWithoutAlbumFolder) {
+            if (parts.length === 1) {
+                return {
+                    kind: "virtualFolder",
+                    virtualFolder: this.assetsWithoutAlbumFolder,
+                };
+            }
+            if (parts.length === 2) {
+                return {
+                    kind: "assetWithoutAlbum",
+                    fileName: parts[1],
+                };
+            }
+
+            throw new Error(`Invalid path: "${filePath}" - expected 1 or 2 segments under "${this.assetsWithoutAlbumFolder}".`);
         }
 
         const virtualFolder = this.findVirtualDirectory(parts[0]);

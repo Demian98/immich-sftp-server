@@ -16,6 +16,7 @@ export class ImmichService {
     private readonly baseUrl = config.immichHost.replace(/\/+$/, '');
     private immichAccessToken: string = '';
     private albumsCache: ImmichAlbum[] = [];
+    private assetsWithoutAlbumCache: ImmichAsset[] = [];
     private readonly tagPrefix: string = '#';
 
 
@@ -284,6 +285,13 @@ export class ImmichService {
     }
 
     //Get Assets
+    async getAssetsWithoutAlbum(refreshCache: boolean): Promise<ImmichAsset[]> {
+        if (this.assetsWithoutAlbumCache.length === 0 || refreshCache) {
+            this.assetsWithoutAlbumCache = await this.fetchAssetsWithoutAlbum();
+        }
+
+        return this.assetsWithoutAlbumCache;
+    }
     async getAssetFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset> {
         const asset = await this.getAssetOrNullFromCache(parsedPath, refreshAssetsForThisAlbum);
         if (asset) {
@@ -292,6 +300,11 @@ export class ImmichService {
         throw new Error(`Asset not found for path: ${JSON.stringify(parsedPath)}`);
     }
     async getAssetOrNullFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset | null> {
+        if (parsedPath.kind === "assetWithoutAlbum") {
+            const assetsWithoutAlbum = await this.getAssetsWithoutAlbum(refreshAssetsForThisAlbum);
+            return assetsWithoutAlbum.find(a => a.originalFileName === parsedPath.fileName) || null;
+        }
+
         //Get the album from the cache
         const album = await this.getAlbumWithAssets(parsedPath, refreshAssetsForThisAlbum);
 
@@ -304,6 +317,30 @@ export class ImmichService {
                 return null;
         }
     }
+    private async fetchAssetsWithoutAlbum(): Promise<ImmichAsset[]> {
+        const assets: ImmichAsset[] = [];
+        let page = 1;
+
+        do {
+            const response = await this.immichRequest({
+                method: 'POST',
+                endpoint: 'search/metadata',
+                data: JSON.stringify({
+                    isNotInAlbum: true,
+                    page: page,
+                    size: 1000,
+                }),
+                logAction: 'Assets without album',
+                skipResponseLog: true,
+            });
+
+            const pageAssets = (response.assets?.items ?? []).map((asset: any): ImmichAsset => this.mapToImmichAsset(asset));
+            assets.push(...pageAssets);
+            page = Number(response.assets?.nextPage ?? 0);
+        } while (page > 0);
+
+        return assets;
+    }
     private async fetchAssetsForAlbum(album: ImmichAlbum): Promise<void> {
         // Fetch assets
         const response = await this.immichRequest({
@@ -314,21 +351,7 @@ export class ImmichService {
         });
 
         // Convert to ImmichAsset
-        album.assets = response.assets.map((asset: any): ImmichAsset => {
-
-            if (!asset.exifInfo?.fileSizeInByte) {
-                console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);
-            }
-
-            return {
-                id: asset.id,
-                originalFileName: asset.originalFileName,
-                fileCreatedAt: asset.fileCreatedAt,
-                fileModifiedAt: asset.fileModifiedAt,
-                fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
-                isTrashed: asset.isTrashed,
-            }
-        });
+        album.assets = response.assets.map((asset: any): ImmichAsset => this.mapToImmichAsset(asset));
     }
 
     //Maintain assets
@@ -341,12 +364,12 @@ export class ImmichService {
             logAction: 'Remove asset from album'
         });
     }
-    async deleteAsset(album: ImmichAlbum, asset: ImmichAsset): Promise<void> {
+    async deleteAsset(album: ImmichAlbum | null, asset: ImmichAsset): Promise<void> {
         // Check in which albums the asset is used
         const albumsForAsset = await this.fetchAlbumsForAssetId(asset.id);
 
         // If the asset is in other albums
-        if (albumsForAsset && albumsForAsset.length > 1) {
+        if (album && albumsForAsset && albumsForAsset.length > 1) {
 
             // Remove asset from album
             await this.removeAssetFromAlbum(album, asset.id);
@@ -360,6 +383,8 @@ export class ImmichService {
                 logAction: 'Delete asset'
             });
         }
+
+        this.assetsWithoutAlbumCache = this.assetsWithoutAlbumCache.filter(a => a.id !== asset.id);
     }
 
     //Get Tags
@@ -448,6 +473,21 @@ export class ImmichService {
 
         //Return filtered albums
         return filteredTags;
+    }
+    private mapToImmichAsset(asset: any): ImmichAsset {
+
+        if (!asset.exifInfo?.fileSizeInByte) {
+            console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);
+        }
+
+        return {
+            id: asset.id,
+            originalFileName: asset.originalFileName,
+            fileCreatedAt: asset.fileCreatedAt,
+            fileModifiedAt: asset.fileModifiedAt,
+            fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
+            isTrashed: asset.isTrashed,
+        }
     }
 
 
