@@ -128,50 +128,53 @@ export class ImmichFileSystem implements VirtualFileSystem {
         return tmpFile;
     }
     async stat(filename: string): Promise<{ isDir: boolean; size: number; mtime: number; } | null> {
-        // Determine if the path is a virtual folder, album or asset
-        const parsedPath = this.parsePath(filename);
+        try {       
+            // Determine if the path is a virtual folder, album or asset
+            const parsedPath = this.parsePath(filename);
 
-        switch (parsedPath.kind) {
-            case "root":
-            case "virtualFolder":
-            case "tag":
-                return {
-                    isDir: true,
-                    size: 0,
-                    mtime: 0,
-                };
+            switch (parsedPath.kind) {
+                case "root":
+                case "virtualFolder":
+                case "tag":
+                    return {
+                        isDir: true,
+                        size: 0,
+                        mtime: 0,
+                    };
 
-            case "album":
-            case "tagAlbum": {
-                const album = await this.immichService.getAlbumOrNullFromCache(parsedPath, true);
-                if (album) {
+                case "album":
+                case "tagAlbum": {
+                    await this.immichService.getAlbumFromCache(parsedPath, true);
                     return {
                         isDir: true,
                         size: 0,    // Albums don't have a size
                         mtime: 0,   // Albums don't have a modification time
-                    };
+                    };                
                 }
-                return null; // Album not found
-            }
 
-            case "asset":
-            case "assetWithoutAlbum":
-            case "tagAsset": {
-                const asset = await this.immichService.getAssetOrNullFromCache(parsedPath, true);
-                if (asset) {
+                case "asset":
+                case "assetWithoutAlbum":
+                case "tagAsset": {
+                    const asset = await this.immichService.getAssetFromCache(parsedPath, true);
                     return {
                         isDir: false,
                         size: asset.fileSizeInByte,
                         mtime: new Date(asset.fileModifiedAt).getTime() / 1000, // Convert to seconds
-                    };
+                    };                
                 }
-                return null; // Asset not found
-            }
 
-            default: {
-                const _exhaustive: never = parsedPath;
-                return _exhaustive;
+                default: {
+                    // Compile-time safety net: if ParsedPath gets a new kind, TypeScript should fail here until we handle it.
+                    const _exhaustive: never = parsedPath;
+                    return _exhaustive;
+                }
             }
+        }
+        catch (error) {
+            //This method should not caused errors, only return null to indicate that the file/folder does not exist.
+            return null;
+            
+            //Todo: do not always return null on error, but distinguish between "not found" and actual errors (e.g., network issues). This requires changes in the ImmichService to throw specific error types.
         }
     }
 

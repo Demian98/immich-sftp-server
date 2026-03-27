@@ -204,7 +204,7 @@ export class ImmichService {
 
         return album;
     }
-    async getAlbumOrNullFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum | null> {
+    private async getAlbumOrNullFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum | null> {
         // If albums are not cached, fetch them
         if (this.albumsCache.length === 0 || refreshCache) {
             this.albumsCache = await this.fetchAlbums();
@@ -299,7 +299,7 @@ export class ImmichService {
         }
         throw new Error(`Asset not found for path: ${JSON.stringify(parsedPath)}`);
     }
-    async getAssetOrNullFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset | null> {
+    private async getAssetOrNullFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset | null> {
         if (parsedPath.kind === "assetWithoutAlbum") {
             const assetsWithoutAlbum = await this.getAssetsWithoutAlbum(refreshAssetsForThisAlbum);
             return assetsWithoutAlbum.find(a => a.originalFileName === parsedPath.fileName) || null;
