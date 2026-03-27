@@ -192,6 +192,17 @@ export class ImmichService {
 
         return album;
     }
+    async getAlbumWithAssets(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAlbum> {
+        //Get the album from the cache
+        const album = await this.getAlbumFromCache(parsedPath, false);
+
+        // If the album has no assets, fetch them
+        if ((album.assets?.length ?? 0) === 0 || refreshAssetsForThisAlbum) {
+            await this.fetchAssetsForAlbum(album);
+        }
+
+        return album;
+    }
     async getAlbumOrNullFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum | null> {
         // If albums are not cached, fetch them
         if (this.albumsCache.length === 0 || refreshCache) {
@@ -282,13 +293,7 @@ export class ImmichService {
     }
     async getAssetOrNullFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset | null> {
         //Get the album from the cache
-        const album = await this.getAlbumOrNullFromCache(parsedPath, false);
-        if (!album) return null;
-
-        // If the album has no assets, fetch them
-        if ((album.assets?.length ?? 0) === 0 || refreshAssetsForThisAlbum) {
-            await this.fetchAssetsForAlbum(album);
-        }
+        const album = await this.getAlbumWithAssets(parsedPath, refreshAssetsForThisAlbum);
 
         // Find the asset in the album based on the original file name
         switch (parsedPath.kind) {
@@ -299,7 +304,7 @@ export class ImmichService {
                 return null;
         }
     }
-    async fetchAssetsForAlbum(album: ImmichAlbum): Promise<void> {
+    private async fetchAssetsForAlbum(album: ImmichAlbum): Promise<void> {
         // Fetch assets
         const response = await this.immichRequest({
             method: 'GET',

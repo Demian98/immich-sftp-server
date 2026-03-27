@@ -81,8 +81,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 case "album":
                 case "tagAlbum": {
                     // Get album and fetch assets
-                    const album = await this.immichService.getAlbumFromCache(parsedPath, false);
-                    await this.immichService.fetchAssetsForAlbum(album);
+                    const album = await this.immichService.getAlbumWithAssets(parsedPath, false);
 
                     // Map assets to the expected format
                     return (album.assets ?? []).map((asset) => ({
@@ -221,8 +220,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         switch (parsedPath.kind) {
             case "album":
             case "tagAlbum": {
-                const album = await this.immichService.getAlbumFromCache(parsedPath, false);
-                await this.immichService.fetchAssetsForAlbum(album);
+                const album = await this.immichService.getAlbumWithAssets(parsedPath, false);
 
                 //Delete all assets in the album
                 for (const asset of album.assets ?? []) {
