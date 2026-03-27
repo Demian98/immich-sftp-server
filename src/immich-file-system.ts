@@ -3,7 +3,7 @@ import fs from 'fs';
 import tmp from 'tmp';
 import { pipeline } from 'stream/promises';
 import { ImmichService } from './immich-service';
-import { AlbumTag, ParsedPath } from './immich-types';
+import { ParsedPath } from './immich-types';
 
 
 // JSON-basiertes VirtualFileSystem-Backend
@@ -49,21 +49,18 @@ export class ImmichFileSystem implements VirtualFileSystem {
                         return albums.map((album) => (this.createDirEntry(album.albumName)));
                     }
                     else if (parsedPath.virtualFolder == this.untaggedAlbumsFolder) {
-                        //Get all albums from Immich API
-                        const albums = await this.immichService.getAllAlbums(false);
-
-                        //Find all albums that don't have the tag prefix in their description
-                        let untaggedAlbums = albums.filter(album => !(album.description ?? "").includes('#'));
+                        //Get untagged albums
+                        const untaggedAlbums = await this.immichService.getUntaggedAlbums(false);
 
                         //Map albums to the expected format
                         return untaggedAlbums.map((album) => (this.createDirEntry(album.albumName)));
                     }
                     else if (parsedPath.virtualFolder == this.tagsFolder) {
                         //Remove invalid or duplicate names
-                        const tags = await this.immichService.getAllTagsFromCache(true);
+                        const tags = await this.immichService.getAllTags(true);
 
                         //Map tags to the expected format
-                        return tags.map((tag: AlbumTag) => (this.createDirEntry(tag.name)));
+                        return tags.map((tag) => (this.createDirEntry(tag.name)));
                     }
                     else if (parsedPath.virtualFolder == this.assetsWithoutAlbumFolder) {
                         //todo
@@ -74,11 +71,11 @@ export class ImmichFileSystem implements VirtualFileSystem {
                     break;
 
                 case "tag": {
-                    //Get tag from cache
-                    const tag = await this.immichService.getTagFromCache(parsedPath, false);
+                    //Get albums for tag
+                    const albumsForTag = await this.immichService.getAlbumsForTag(parsedPath, false);
 
                     //Map albums to the expected format
-                    return tag.albums.map((album) => (this.createDirEntry(album.albumName)));
+                    return albumsForTag.map((album) => (this.createDirEntry(album.albumName)));
                 }
 
                 case "album":

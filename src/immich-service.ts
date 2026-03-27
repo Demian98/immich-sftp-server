@@ -159,6 +159,13 @@ export class ImmichService {
 
         return this.albumsCache;
     }
+    async getUntaggedAlbums(refreshCache: boolean): Promise<ImmichAlbum[]> {
+        //Get all albums from Immich API
+        const albums = await this.getAllAlbums(refreshCache);
+
+        //Find all albums that don't have the tag prefix in their description
+        return albums.filter(album => !(album.description ?? "").includes(this.tagPrefix));
+    }
     private async fetchAlbums(): Promise<ImmichAlbum[]> {
 
         //Parameter "shaerd":
@@ -351,7 +358,17 @@ export class ImmichService {
     }
 
     //Get Tags
-    async getAllTagsFromCache(refreshCache: boolean): Promise<AlbumTag[]> {
+    async getAllTags(refreshCache: boolean): Promise<AlbumTag[]> {
+        return await this.getAllTagsFromCache(refreshCache);
+    }
+    async getAlbumsForTag(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum[]> {
+        //Get tag from cache
+        const tag = await this.getTagFromCache(parsedPath, refreshCache);
+
+        //Map albums to the expected format
+        return tag.albums;
+    }
+    private async getAllTagsFromCache(refreshCache: boolean): Promise<AlbumTag[]> {
         //Todo implement cache refresh
 
         //Get all albums from Immich API
@@ -389,7 +406,7 @@ export class ImmichService {
         //Build map
         return filteredTags;
     }
-    async getTagFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<AlbumTag> {
+    private async getTagFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<AlbumTag> {
         const tag = await this.getTagOrNullFromCache(parsedPath, refreshCache);
         if (!tag) {
             throw new Error(`Tag not found for path: ${JSON.stringify(parsedPath)}`);
@@ -397,7 +414,7 @@ export class ImmichService {
 
         return tag;
     }
-    async getTagOrNullFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<AlbumTag | null> {
+    private async getTagOrNullFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<AlbumTag | null> {
         // If albums are not cached, fetch them
         if (this.albumsCache.length === 0 || refreshCache) {
             this.albumsCache = await this.fetchAlbums();
