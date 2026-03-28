@@ -208,7 +208,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         const parsedPath = this.parsePath(filename);
 
         // Let the service handle the full upload finalization flow
-        await this.immichService.uploadAssetToAlbum(parsedPath, filename, fileEntry.tmpFile, mtime);
+        await this.immichService.uploadAsset(parsedPath, filename, fileEntry.tmpFile, mtime);
     }
     async rename(oldName: string, newName: string): Promise<void> {
         // Check if the file exists in the upload queue

@@ -44,7 +44,7 @@ export class ImmichService {
     }
 
     //Upload assets
-    async uploadAssetToAlbum(parsedPath: ParsedPath, filename: string, tmpFile: tmp.FileResult, mtime: number): Promise<void> {
+    async uploadAsset(parsedPath: ParsedPath, filename: string, tmpFile: tmp.FileResult, mtime: number): Promise<void> {
         // Calculate SHA-1 checksum of the buffer
         const hash = crypto.createHash('sha1');
         await pipeline(fs.createReadStream(tmpFile.name), hash);
@@ -61,13 +61,16 @@ export class ImmichService {
         const reason = result.reason;
         console.log(`Bulk check result for '${filename}': action=${action}, assetId=${assetId}, isTrashed=${isTrashed}, reason=${reason}`);
         
-        // Get the album from the cache
-        const album = await this.getAlbumFromCache(parsedPath, false);
+        // Get the album from the cache, in case an album is used
+        // It is important to get the album before the upload, to cause an error in case the album doesn't exist.
+        const album = parsedPath.kind === "assetWithoutAlbum"
+            ? null
+            : await this.getAlbumFromCache(parsedPath, false);
         
         // If the asset doen't exist, upload it
         if (action == "accept") {
 
-            const uploadResponse = await this.createAsset(filename, tmpFile.name, mtime, album.id);
+            const uploadResponse = await this.createAsset(filename, tmpFile.name, mtime, album?.id);
 
             // Close tmp file after successful upload
             tmpFile.removeCallback();
@@ -92,7 +95,12 @@ export class ImmichService {
         }
 
         // Add the new asset to the album
-        await this.addAssetToAlbum(album.id, assetId);
+        if (album) {
+            await this.addAssetToAlbum(album.id, assetId);
+        }
+        else {
+            this.assetsWithoutAlbumCache = [];
+        }
     }
     private async bulkUploadCheck(filename: string, checksum: string): Promise<any> {
         return await this.immichRequest({
@@ -109,7 +117,7 @@ export class ImmichService {
             logAction: 'Bulk upload check'
         });
     }
-    private async createAsset(filename: string, tmpFilePath: string, mtime: number, albumId: string): Promise<any> {
+    private async createAsset(filename: string, tmpFilePath: string, mtime: number, albumId?: string): Promise<any> {
         // Prepare form data
         const data = new FormData();
         const isoWithOffset = DateTime.fromSeconds(mtime, { zone: config.TZ }).toISO();
@@ -117,7 +125,9 @@ export class ImmichService {
         data.append('fileCreatedAt', isoWithOffset);
         data.append('deviceAssetId', filename); // Use fileName as deviceAssetId
         data.append('deviceId', 'immich-sftp-server');
-        data.append('albumId', albumId);
+        if (albumId) {
+            data.append('albumId', albumId);
+        }
 
         // Add stream from tmp file
         const readStream = fs.createReadStream(tmpFilePath);
