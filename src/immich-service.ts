@@ -360,6 +360,7 @@ export class ImmichService {
                 endpoint: 'search/metadata',
                 data: JSON.stringify({
                     isNotInAlbum: true,
+                    withExif: true,
                     page: page,
                     size: 1000,
                 }),
