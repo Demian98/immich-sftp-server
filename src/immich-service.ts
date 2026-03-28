@@ -217,8 +217,19 @@ export class ImmichService {
             case "tagAlbum":
             case "tagAsset":
                 return this.albumsCache.find(a => a.albumName === parsedPath.albumName) || null;
-            default:
+
+            //Default: return null, for all non album items
+            case "root":
+            case "virtualFolder":
+            case "tag":
+            case "assetWithoutAlbum":
                 return null;
+
+            default: {
+                // Safety check: if ParsedPath gets a new kind, we must handle it here.
+                const _exhaustive: never = parsedPath;
+                throw new Error(`Unhandled ParsedPath kind: ${JSON.stringify(_exhaustive)}`);
+            }
         }
     }
     private filterAlbums(response: any) {
@@ -313,8 +324,20 @@ export class ImmichService {
             case "asset":
             case "tagAsset":
                 return album.assets?.find(a => a.originalFileName === parsedPath.fileName) || null;
-            default:
+
+            //Default: return null, for all non asset items
+            case "root":
+            case "virtualFolder":
+            case "tag":
+            case "album":
+            case "tagAlbum":
                 return null;
+
+            default: {
+                // Safety check: if ParsedPath gets a new kind, we must handle it here.
+                const _exhaustive: never = parsedPath;
+                throw new Error(`Unhandled ParsedPath kind: ${JSON.stringify(_exhaustive)}`);
+            }
         }
     }
     private async fetchAssetsWithoutAlbum(): Promise<ImmichAsset[]> {

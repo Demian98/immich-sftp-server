@@ -72,7 +72,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                             mtime: new Date(asset.fileModifiedAt).getTime() / 1000, // Convert to seconds
                         }));
                     }
-                    break;
+                    throw new Error(`Unsupported virtual folder: ${currentDir}`);
 
                 case "tag": {
                     //Get albums for tag
@@ -100,9 +100,13 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 case "assetWithoutAlbum":
                 case "tagAsset":
                     throw new Error(`Cannot list files for asset path: ${currentDir}`);
-            }
 
-            throw new Error(`Unsupported directory path: ${currentDir}`);
+                default: {
+                    // Safety check: if ParsedPath gets a new kind, we must handle it here.
+                    const _exhaustive: never = parsedPath;
+                    throw new Error(`Unhandled ParsedPath kind: ${JSON.stringify(_exhaustive)}`);
+                }
+            }
         }
         catch (error) {
             console.error("Error fetching albums:", error);
@@ -164,9 +168,9 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 }
 
                 default: {
-                    // Compile-time safety net: if ParsedPath gets a new kind, TypeScript should fail here until we handle it.
+                    // Safety check: if ParsedPath gets a new kind, we must handle it here.
                     const _exhaustive: never = parsedPath;
-                    return _exhaustive;
+                    throw new Error(`Unhandled ParsedPath kind: ${JSON.stringify(_exhaustive)}`);
                 }
             }
         }
@@ -257,9 +261,18 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 const asset = await this.immichService.getAssetFromCache(parsedPath, false);
                 await this.immichService.deleteAsset(null, asset);
                 return;
-            }   
-            default:
+            }
+
+            case "root":
+            case "virtualFolder":
+            case "tag":
                 throw new Error(`Remove not supported for path: ${filename}`);
+
+            default: {
+                // Safety check: if ParsedPath gets a new kind, we must handle it here.
+                const _exhaustive: never = parsedPath;
+                throw new Error(`Unhandled ParsedPath kind: ${JSON.stringify(_exhaustive)}`);
+            }
         }
     }
 
