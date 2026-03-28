@@ -181,24 +181,6 @@ export class ImmichService {
         //Find all albums that don't have the tag prefix in their description
         return albums.filter(album => !(album.description ?? "").includes(this.tagPrefix));
     }
-    private async fetchAlbums(): Promise<ImmichAlbum[]> {
-
-        //Parameter "shaerd":
-        // - not set: All albums owned by me, also when shared with other users
-        // - false: only own albums, that are not shared with other users
-        // - true: only shared albums, own and from other users shared with me
-
-        // Fetch albums from Immich API
-        const response = await this.immichRequest({
-            method: 'GET',
-            endpoint: 'albums',
-            logAction: 'All own albums',
-            skipResponseLog: true,
-        });
-
-        //Process and filter albums
-        return this.filterAlbums(response);
-    }
     async getAlbumFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum> {
         const album = await this.getAlbumOrNullFromCache(parsedPath, refreshCache);
         if (!album) {
@@ -245,6 +227,24 @@ export class ImmichService {
                 throw new Error(`Unhandled ParsedPath kind: ${JSON.stringify(_exhaustive)}`);
             }
         }
+    }
+    private async fetchAlbums(): Promise<ImmichAlbum[]> {
+
+        //Parameter "shaerd":
+        // - not set: All albums owned by me, also when shared with other users
+        // - false: only own albums, that are not shared with other users
+        // - true: only shared albums, own and from other users shared with me
+
+        // Fetch albums from Immich API
+        const response = await this.immichRequest({
+            method: 'GET',
+            endpoint: 'albums',
+            logAction: 'All own albums',
+            skipResponseLog: true,
+        });
+
+        //Process and filter albums
+        return this.filterAlbums(response);
     }
     private filterAlbums(response: any) {
         // Map response to ImmichAlbum objects
