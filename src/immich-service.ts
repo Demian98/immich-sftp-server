@@ -381,16 +381,6 @@ export class ImmichService {
 
     //Get Tags
     async getAllTags(refreshCache: boolean): Promise<AlbumTag[]> {
-        return await this.getAllTagsFromCache(refreshCache);
-    }
-    async getAlbumsForTag(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum[]> {
-        //Get tag from cache
-        const tag = await this.getTagFromCache(parsedPath, refreshCache);
-
-        //Map albums to the expected format
-        return tag.albums;
-    }
-    private async getAllTagsFromCache(refreshCache: boolean): Promise<AlbumTag[]> {
         //Todo implement cache refresh
 
         //Get all albums from Immich API
@@ -428,6 +418,13 @@ export class ImmichService {
         //Build map
         return filteredTags;
     }
+    async getAlbumsForTag(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum[]> {
+        //Get tag from cache
+        const tag = await this.getTagFromCache(parsedPath, refreshCache);
+
+        //Map albums to the expected format
+        return tag.albums;
+    }
     private async getTagFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<AlbumTag> {
         const tag = await this.getTagOrNullFromCache(parsedPath, refreshCache);
         if (!tag) {
@@ -447,7 +444,7 @@ export class ImmichService {
             return null;
         }
 
-        const tags = await this.getAllTagsFromCache(false);
+        const tags = await this.getAllTags(false);
         return tags.find(t => t.name === parsedPath.tagName) || null;
     }
     private filterTags(tags: Array<AlbumTag>): Array<AlbumTag> {
