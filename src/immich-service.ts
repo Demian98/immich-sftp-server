@@ -223,6 +223,18 @@ export class ImmichService {
         //Process and filter albums
         return this.filterAlbums(response);
     }
+    private async fetchAlbumsForAssetId(assetId: string): Promise<ImmichAlbum[]> {
+        // Check in which albums the asset is used
+        const response = await this.immichRequest({
+            method: 'GET',
+            endpoint: `albums?assetId=${assetId}`,
+            logAction: 'Albums for assetId',
+            skipResponseLog: true,
+        });
+
+        //Process and filter albums
+        return this.filterAlbums(response);
+    }
     private filterAlbums(response: any) {
         // Map response to ImmichAlbum objects
         const albums: ImmichAlbum[] = response.map((item: any): ImmichAlbum => ({
@@ -247,18 +259,6 @@ export class ImmichService {
 
         //Return filtered albums
         return filteredAlbums;
-    }
-    private async fetchAlbumsForAssetId(assetId: string): Promise<ImmichAlbum[]> {
-        // Check in which albums the asset is used
-        const response = await this.immichRequest({
-            method: 'GET',
-            endpoint: `albums?assetId=${assetId}`,
-            logAction: 'Albums for assetId',
-            skipResponseLog: true,
-        });
-
-        //Process and filter albums
-        return this.filterAlbums(response);
     }
 
     //Maintain albums
