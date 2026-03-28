@@ -95,7 +95,7 @@ export class ImmichService {
             }
 
             //Restore the asset from the trash
-            await this.restoreAssets([assetId]);
+            await this.restoreAsset(assetId);
         }
 
         // Add the new asset to the album
@@ -262,11 +262,11 @@ export class ImmichService {
     }
 
     //Maintain albums
-    private async restoreAssets(assetIds: string[]): Promise<void> {
+    private async restoreAsset(assetId: string): Promise<void> {
         await this.immichRequest({
             method: 'POST',
             endpoint: 'trash/restore/assets',
-            data: JSON.stringify({ ids: assetIds }),
+            data: JSON.stringify({ ids: [assetId] }),
             logAction: 'Restore asset'
         });
     }
