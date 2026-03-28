@@ -45,6 +45,7 @@ export class ImmichService {
 
     //Upload assets
     async uploadAsset(parsedPath: ParsedPath, filename: string, tmpFile: tmp.FileResult, mtime: number): Promise<void> {
+        
         // Calculate SHA-1 checksum of the buffer
         const hash = crypto.createHash('sha1');
         await pipeline(fs.createReadStream(tmpFile.name), hash);
@@ -52,8 +53,6 @@ export class ImmichService {
 
         // Check if the asset already exists using bulk-upload-check
         const bulkCheckResponse = await this.bulkUploadCheck(filename, checksum);
-
-        // Parse response
         const result = bulkCheckResponse.results[0];
         const action = result.action;
         let assetId = result.assetId;
@@ -61,12 +60,17 @@ export class ImmichService {
         const reason = result.reason;
         console.log(`Bulk check result for '${filename}': action=${action}, assetId=${assetId}, isTrashed=${isTrashed}, reason=${reason}`);
         
+       // Uploading into "assets without album" must fail if Immich rejects the upload for an existing non-trashed asset.
+        if (parsedPath.kind === "assetWithoutAlbum" && action == "reject" && isTrashed != true) {
+            throw new Error(`Upload rejected for asset without album: ${filename}. Reason=${reason}, assetId=${assetId}`);
+        }     
+
         // Get the album from the cache, in case an album is used
         // It is important to get the album before the upload, to cause an error in case the album doesn't exist.
         const album = parsedPath.kind === "assetWithoutAlbum"
             ? null
             : await this.getAlbumFromCache(parsedPath, false);
-        
+ 
         // If the asset doen't exist, upload it
         if (action == "accept") {
 
