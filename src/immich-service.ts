@@ -344,6 +344,21 @@ export class ImmichService {
 
         // Convert to ImmichAsset
         album.assets = response.assets.map((asset: any): ImmichAsset => this.mapToImmichAsset(asset));
+    }    
+    private mapToImmichAsset(asset: any): ImmichAsset {
+
+        if (!asset.exifInfo?.fileSizeInByte) {
+            console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);
+        }
+
+        return {
+            id: asset.id,
+            originalFileName: asset.originalFileName,
+            fileCreatedAt: asset.fileCreatedAt,
+            fileModifiedAt: asset.fileModifiedAt,
+            fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
+            isTrashed: asset.isTrashed,
+        }
     }
 
     //Maintain assets
@@ -444,21 +459,6 @@ export class ImmichService {
 
         //Return filtered albums
         return filteredTags;
-    }
-    private mapToImmichAsset(asset: any): ImmichAsset {
-
-        if (!asset.exifInfo?.fileSizeInByte) {
-            console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);
-        }
-
-        return {
-            id: asset.id,
-            originalFileName: asset.originalFileName,
-            fileCreatedAt: asset.fileCreatedAt,
-            fileModifiedAt: asset.fileModifiedAt,
-            fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
-            isTrashed: asset.isTrashed,
-        }
     }
 
 
