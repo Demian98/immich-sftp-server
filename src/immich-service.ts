@@ -69,7 +69,7 @@ export class ImmichService {
         // It is important to get the album before the upload, to cause an error in case the album doesn't exist.
         const album = parsedPath.kind === "assetWithoutAlbum"
             ? null
-            : await this.getAlbumFromCache(parsedPath, false);
+            : await this.getAlbum(parsedPath, false);
         
         // If the asset doen't exist, upload it
         if (action == "accept") {
@@ -181,17 +181,22 @@ export class ImmichService {
         //Find all albums that don't have the tag prefix in their description
         return albums.filter(album => !(album.description ?? "").includes(this.tagPrefix));
     }
-    async getAlbumFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum> {
-        const album = await this.getAlbumOrNullFromCache(parsedPath, refreshCache);
-        if (!album) {
-            throw new Error(`Album not found for path: ${JSON.stringify(parsedPath)}`);
+    async getAlbum(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum> {
+        //Get all albums
+        const albums = await this.getAllAlbums(refreshCache);
+
+        //Try to find and return the album based on the path
+        if (("albumName" in parsedPath)) {
+            const album = albums.find(a => a.albumName === parsedPath.albumName) ?? null;
+            if (album) return album;
         }
 
-        return album;
+        //Album not found, throw error
+        throw new Error(`Album not found for path: ${JSON.stringify(parsedPath)}`);
     }
     async getAlbumWithAssets(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAlbum> {
         //Get the album from the cache
-        const album = await this.getAlbumFromCache(parsedPath, false);
+        const album = await this.getAlbum(parsedPath, false);
 
         // If the album has no assets, fetch them
         if ((album.assets?.length ?? 0) === 0 || refreshAssetsForThisAlbum) {
@@ -199,34 +204,6 @@ export class ImmichService {
         }
 
         return album;
-    }
-    private async getAlbumOrNullFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum | null> {
-        // If albums are not cached, fetch them
-        if (this.albumsCache.length === 0 || refreshCache) {
-            this.albumsCache = await this.fetchAlbums();
-        }
-
-        // Find the album based on the parsed path
-        switch (parsedPath.kind) {
-            case "album":
-            case "asset":
-            case "tagAlbum":
-            case "tagAsset":
-                return this.albumsCache.find(a => a.albumName === parsedPath.albumName) || null;
-
-            //Default: return null, for all non album items
-            case "root":
-            case "virtualFolder":
-            case "tag":
-            case "assetWithoutAlbum":
-                return null;
-
-            default: {
-                // Safety check: if ParsedPath gets a new kind, we must handle it here.
-                const _exhaustive: never = parsedPath;
-                throw new Error(`Unhandled ParsedPath kind: ${JSON.stringify(_exhaustive)}`);
-            }
-        }
     }
     private async fetchAlbums(): Promise<ImmichAlbum[]> {
 

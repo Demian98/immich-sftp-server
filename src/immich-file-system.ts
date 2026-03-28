@@ -148,7 +148,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
                 case "album":
                 case "tagAlbum": {
-                    await this.immichService.getAlbumFromCache(parsedPath, true);
+                    await this.immichService.getAlbum(parsedPath, true);
                     return {
                         isDir: true,
                         size: 0,    // Albums don't have a size
@@ -249,7 +249,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             case "tagAsset": {
                 //Get asset and album from cache
                 const asset = await this.immichService.getAssetFromCache(parsedPath, false);
-                const album = await this.immichService.getAlbumFromCache(parsedPath, false);
+                const album = await this.immichService.getAlbum(parsedPath, false);
 
                 // Delete the asset
                 await this.immichService.deleteAsset(album, asset);
