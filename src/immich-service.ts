@@ -419,33 +419,15 @@ export class ImmichService {
         return filteredTags;
     }
     async getAlbumsForTag(parsedPath: ParsedPath, refreshCache: boolean): Promise<ImmichAlbum[]> {
-        //Get tag from cache
-        const tag = await this.getTagFromCache(parsedPath, refreshCache);
-
-        //Map albums to the expected format
-        return tag.albums;
-    }
-    private async getTagFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<AlbumTag> {
-        const tag = await this.getTagOrNullFromCache(parsedPath, refreshCache);
-        if (!tag) {
-            throw new Error(`Tag not found for path: ${JSON.stringify(parsedPath)}`);
+        //Try to find and return the tag based on the path
+        if (("tagName" in parsedPath)) {
+            const tags = await this.getAllTags(refreshCache);
+            const tag = tags.find(t => t.name === parsedPath.tagName) ?? null;
+            if (tag) return tag.albums;
         }
 
-        return tag;
-    }
-    private async getTagOrNullFromCache(parsedPath: ParsedPath, refreshCache: boolean): Promise<AlbumTag | null> {
-        // If albums are not cached, fetch them
-        if (this.albumsCache.length === 0 || refreshCache) {
-            this.albumsCache = await this.fetchAlbums();
-        }
-
-        // Find the tag based on the parsed path
-        if (parsedPath.kind !== "tag" && parsedPath.kind !== "tagAlbum" && parsedPath.kind !== "tagAsset") {
-            return null;
-        }
-
-        const tags = await this.getAllTags(false);
-        return tags.find(t => t.name === parsedPath.tagName) || null;
+        //Tag not found, throw error
+        throw new Error(`Tag not found for path: ${JSON.stringify(parsedPath)}`);
     }
     private filterTags(tags: Array<AlbumTag>): Array<AlbumTag> {
         // Filter out albums with empty or invalid names
