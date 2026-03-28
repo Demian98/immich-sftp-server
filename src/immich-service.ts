@@ -294,42 +294,19 @@ export class ImmichService {
 
         return this.assetsWithoutAlbumCache;
     }
-    async getAssetFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset> {
-        const asset = await this.getAssetOrNullFromCache(parsedPath, refreshAssetsForThisAlbum);
-        if (asset) {
-            return asset;
+    async getAsset(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset> {
+        //Try to find and return the asset based on the path
+        if (("fileName" in parsedPath)) {
+            const assets = parsedPath.kind === "assetWithoutAlbum"
+                ? await this.getAssetsWithoutAlbum(refreshAssetsForThisAlbum)
+                : (await this.getAlbumWithAssets(parsedPath, refreshAssetsForThisAlbum)).assets ?? [];
+
+            const asset = assets.find(a => a.originalFileName === parsedPath.fileName) ?? null;
+            if (asset) return asset;
         }
+
+        //Asset not found, throw error
         throw new Error(`Asset not found for path: ${JSON.stringify(parsedPath)}`);
-    }
-    private async getAssetOrNullFromCache(parsedPath: ParsedPath, refreshAssetsForThisAlbum: boolean): Promise<ImmichAsset | null> {
-        if (parsedPath.kind === "assetWithoutAlbum") {
-            const assetsWithoutAlbum = await this.getAssetsWithoutAlbum(refreshAssetsForThisAlbum);
-            return assetsWithoutAlbum.find(a => a.originalFileName === parsedPath.fileName) || null;
-        }
-
-        //Get the album from the cache
-        const album = await this.getAlbumWithAssets(parsedPath, refreshAssetsForThisAlbum);
-
-        // Find the asset in the album based on the original file name
-        switch (parsedPath.kind) {
-            case "asset":
-            case "tagAsset":
-                return album.assets?.find(a => a.originalFileName === parsedPath.fileName) || null;
-
-            //Default: return null, for all non asset items
-            case "root":
-            case "virtualFolder":
-            case "tag":
-            case "album":
-            case "tagAlbum":
-                return null;
-
-            default: {
-                // Safety check: if ParsedPath gets a new kind, we must handle it here.
-                const _exhaustive: never = parsedPath;
-                throw new Error(`Unhandled ParsedPath kind: ${JSON.stringify(_exhaustive)}`);
-            }
-        }
     }
     private async fetchAssetsWithoutAlbum(): Promise<ImmichAsset[]> {
         const assets: ImmichAsset[] = [];

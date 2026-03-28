@@ -118,7 +118,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         // Get the asset from the cache
         const parsedPath = this.parsePath(filename);
-        const asset = await this.immichService.getAssetFromCache(parsedPath, false);
+        const asset = await this.immichService.getAsset(parsedPath, false);
 
         // Fetch the original file as a buffer
         const responseStream = await this.immichService.downloadAsset(asset.id);
@@ -159,7 +159,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 case "asset":
                 case "assetWithoutAlbum":
                 case "tagAsset": {
-                    const asset = await this.immichService.getAssetFromCache(parsedPath, true);
+                    const asset = await this.immichService.getAsset(parsedPath, true);
                     return {
                         isDir: false,
                         size: asset.fileSizeInByte,
@@ -248,7 +248,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
             case "asset":
             case "tagAsset": {
                 //Get asset and album from cache
-                const asset = await this.immichService.getAssetFromCache(parsedPath, false);
+                const asset = await this.immichService.getAsset(parsedPath, false);
                 const album = await this.immichService.getAlbum(parsedPath, false);
 
                 // Delete the asset
@@ -258,7 +258,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
             case "assetWithoutAlbum": {
                 //Find asset and delete it
-                const asset = await this.immichService.getAssetFromCache(parsedPath, false);
+                const asset = await this.immichService.getAsset(parsedPath, false);
                 await this.immichService.deleteAsset(null, asset);
                 return;
             }
