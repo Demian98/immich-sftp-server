@@ -60,9 +60,9 @@ export class ImmichService {
         const reason = result.reason;
         console.log(`Bulk check result for '${filename}': action=${action}, assetId=${assetId}, isTrashed=${isTrashed}, reason=${reason}`);
         
-       // Uploading into "assets without album" must fail if Immich rejects the upload for an existing non-trashed asset.
+        // Uploading into "assets without album" is not allowed, in case the asset is alrady in any album
         if (parsedPath.kind === "assetWithoutAlbum" && action == "reject" && isTrashed != true) {
-            throw new Error(`Upload rejected for asset without album: ${filename}. Reason=${reason}, assetId=${assetId}`);
+            throw new Error(`Upload in 'assets without album' failed, as the asset alread exists in an album. Filename: ${filename}, AssetId: ${assetId}`);
         }     
 
         // Get the album from the cache, in case an album is used
@@ -70,7 +70,7 @@ export class ImmichService {
         const album = parsedPath.kind === "assetWithoutAlbum"
             ? null
             : await this.getAlbumFromCache(parsedPath, false);
- 
+        
         // If the asset doen't exist, upload it
         if (action == "accept") {
 
