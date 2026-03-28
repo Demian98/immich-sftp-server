@@ -43,14 +43,14 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 case "virtualFolder":
                     if (parsedPath.virtualFolder == this.allAlbumsFolder) {
                         //Get all albums from Immich API
-                        const albums = await this.immichService.getAllAlbums(false);
+                        const albums = await this.immichService.getAllAlbums(true);
 
                         //Map albums to the expected format
                         return albums.map((album) => (this.createDirEntry(album.albumName)));
                     }
                     else if (parsedPath.virtualFolder == this.untaggedAlbumsFolder) {
                         //Get untagged albums
-                        const untaggedAlbums = await this.immichService.getUntaggedAlbums(false);
+                        const untaggedAlbums = await this.immichService.getUntaggedAlbums(true);
 
                         //Map albums to the expected format
                         return untaggedAlbums.map((album) => (this.createDirEntry(album.albumName)));
@@ -63,7 +63,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                         return tags.map((tag) => (this.createDirEntry(tag.name)));
                     }
                     else if (parsedPath.virtualFolder == this.assetsWithoutAlbumFolder) {
-                        const assetsWithoutAlbum = await this.immichService.getAssetsWithoutAlbum(false);
+                        const assetsWithoutAlbum = await this.immichService.getAssetsWithoutAlbum(true);
 
                         return assetsWithoutAlbum.map((asset) => ({
                             name: asset.originalFileName,
@@ -76,7 +76,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
                 case "tag": {
                     //Get albums for tag
-                    const albumsForTag = await this.immichService.getAlbumsForTag(parsedPath, false);
+                    const albumsForTag = await this.immichService.getAlbumsForTag(parsedPath, true);
 
                     //Map albums to the expected format
                     return albumsForTag.map((album) => (this.createDirEntry(album.albumName)));
@@ -85,7 +85,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
                 case "album":
                 case "tagAlbum": {
                     // Get album and fetch assets
-                    const album = await this.immichService.getAlbumWithAssets(parsedPath, false);
+                    const album = await this.immichService.getAlbumWithAssets(parsedPath, true);
 
                     // Map assets to the expected format
                     return (album.assets ?? []).map((asset) => ({
