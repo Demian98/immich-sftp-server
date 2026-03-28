@@ -198,11 +198,19 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
     async setAttributes(filename: string, mtime: number): Promise<void> {
 
-        // Check if the file exists in the upload queue
-        const fileEntry = this.uploadQueue.find(f => f.filename === filename);
-        if (!fileEntry) {
+        // Check if the file exists exactly once in the upload queue
+        const matchingEntries = this.uploadQueue.filter(f => f.filename === filename);
+        if (matchingEntries.length === 0) {
             throw new Error(`File not found in upload queue: ${filename}`);
         }
+        if (matchingEntries.length > 1) {
+            throw new Error(`Multiple upload queue entries found for file: ${filename}`);
+        }
+        const fileEntry = matchingEntries[0];
+
+        // Remove the file from the upload queue
+        // Important, remove before the upload, to not collect failed attempts
+        this.uploadQueue.splice(this.uploadQueue.indexOf(fileEntry), 1);
 
         // Parse the path for the upload target
         const parsedPath = this.parsePath(filename);
