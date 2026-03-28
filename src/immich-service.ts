@@ -396,14 +396,12 @@ export class ImmichService {
 
     //Get Tags
     async getAllTags(refreshCache: boolean): Promise<AlbumTag[]> {
-        //Todo implement cache refresh
-
-        //Get all albums from Immich API
-        this.albumsCache = await this.fetchAlbums();
+        //Get all albums
+        const albums = await this.getAllAlbums(refreshCache);
 
         //Find all tags in the album descriptions
         const tags = new Array<AlbumTag>();
-        this.albumsCache.forEach((album) => {
+        albums.forEach((album) => {
             const description = album.description ?? "";
 
             // (\\S+) means "match one or more non-whitespace characters and capture them as a group".
