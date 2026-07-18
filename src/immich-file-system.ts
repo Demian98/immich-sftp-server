@@ -81,19 +81,21 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
         // If the asset doen't exist, upload it
         if (action == "accept") {
+            const originalFileName = this.extractPathInfo(filename).fileName;
+            if (!originalFileName) {
+                throw new Error(`Invalid asset path for upload: ${filename}`);
+            }
 
             // Prepare form data
             const data = new FormData();
             const isoWithOffset = DateTime.fromSeconds(mtime, { zone: config.TZ }).toISO();
             data.append('fileModifiedAt', isoWithOffset);
             data.append('fileCreatedAt', isoWithOffset);
-            data.append('deviceAssetId', filename); // Use fileName as deviceAssetId
-            data.append('deviceId', 'immich-sftp-server');
-            data.append('albumId', album.id);
+            data.append('filename', originalFileName);
 
             // Add stream from tmp file
             const readStream = fs.createReadStream(fileEntry.tmpFile.name);
-            data.append('assetData', readStream, { filename: filename });
+            data.append('assetData', readStream, { filename: originalFileName });
 
             // Send the upload request to Immich
             const uploadResponse = await this.immichRequest({
@@ -294,16 +296,25 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
     //Find albums and assets    
     private async fetchAlbums(): Promise<ImmichAlbum[]> {
-
-        //Parameter "shaerd":
-        // - not set: All albums owned by me, also when shared with other users
-        // - false: only own albums, that are not shared with other users
-        // - true: only shared albums, own and from other users shared with me
-
-        // Fetch albums from Immich API
+        /*
+         * Immich v3 album filters:
+         *
+         * isOwned | isShared | Result
+         * --------|----------|--------------------------------------------------------
+         * —       | —        | All accessible albums (owned + shared-with-me)
+         * true    | —        | Only albums owned by the user
+         * false   | —        | Only albums shared with the user
+         * true    | true     | Owned albums that have been shared out
+         * true    | false    | Owned private albums
+         * —       | true     | All albums involving sharing
+         * —       | false    | Private albums only
+         * false   | true     | Albums shared with the user (same as isOwned=false)
+         * false   | false    | Empty (logically impossible)
+         *
+         */
         const response = await this.immichRequest({
             method: 'GET',
-            endpoint: 'albums',
+            endpoint: 'albums?isOwned=true',
             logAction: 'All own albums',
             skipResponseLog: true,
         });
