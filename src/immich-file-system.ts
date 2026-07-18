@@ -116,7 +116,7 @@ export class ImmichFileSystem implements VirtualFileSystem {
         if (action == "reject" && isTrashed == true) {
 
             //Remove the trashed asset from other albums, in case it has some
-            const assigedAlbums = await this.fetchAlbumsForAssetId(assetId);
+            const assigedAlbums = await this.fetchAlbumsForAssetId(assetId, false);
             if (assigedAlbums && assigedAlbums.length > 0) {
                 for (const assigedAlbum of assigedAlbums) {
                     await this.removeAssetFromAlbum(assigedAlbum, assetId);
@@ -319,10 +319,10 @@ export class ImmichFileSystem implements VirtualFileSystem {
             skipResponseLog: true,
         });
 
-        //Process and filter albums
-        return this.filterAlbums(response);
+        // Only apply SFTP-specific filters to the albums exposed as folders.
+        return this.filterAlbumsForSftp(this.mapAlbums(response));
     }
-    private async fetchAlbumsForAssetId(assetId: string): Promise<ImmichAlbum[]> {
+    private async fetchAlbumsForAssetId(assetId: string, filterForSftp: boolean): Promise<ImmichAlbum[]> {
         // Check in which albums the asset is used
         const response = await this.immichRequest({
             method: 'GET',
@@ -331,17 +331,22 @@ export class ImmichFileSystem implements VirtualFileSystem {
             skipResponseLog: true,
         });
 
-        //Process and filter albums
-        return this.filterAlbums(response);
+        // Filter only for SFTP if requested, otherwise return all albums for the asset.
+        // For exmaple in case of deletion, we need to know all albums the asset is in, not just the SFTP-visible ones.
+        if (filterForSftp) 
+            return this.filterAlbumsForSftp(this.mapAlbums(response));
+        else 
+            return this.mapAlbums(response);
     }
-    private filterAlbums(response: any) {
+    private mapAlbums(response: any): ImmichAlbum[] {
         // Map response to ImmichAlbum objects
-        const albums: ImmichAlbum[] = response.map((item: any): ImmichAlbum => ({
+        return response.map((item: any): ImmichAlbum => ({
             id: item.id,
             albumName: item.albumName,
             description: item.description,
         }));
-
+    }
+    private filterAlbumsForSftp(albums: ImmichAlbum[]): ImmichAlbum[] {
         // Filter out albums whose description contains "#nosync"
         let filteredAlbums = albums.filter(album => !album.description?.includes('#nosync'));
 
@@ -482,10 +487,11 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
     private async deleteAsset(album: ImmichAlbum, asset: ImmichAsset): Promise<void> {
         // Check in which albums the asset is used
-        const albumsForAsset = await this.fetchAlbumsForAssetId(asset.id);
+        const albumsForAsset = await this.fetchAlbumsForAssetId(asset.id, false);
+        const isUsedInAnotherAlbum = albumsForAsset.some(assignedAlbum => assignedAlbum.id !== album.id);
 
         // If the asset is in other albums
-        if (albumsForAsset && albumsForAsset.length > 1) {
+        if (isUsedInAnotherAlbum) {
 
             // Remove asset from album
             await this.removeAssetFromAlbum(album, asset.id);
