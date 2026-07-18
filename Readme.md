@@ -1,5 +1,10 @@
 # Immich SFTP Server
 
+[![Latest release](https://img.shields.io/github/v/release/Demian98/immich-sftp-server?sort=semver&display_name=tag&style=flat-square)](https://github.com/Demian98/immich-sftp-server/releases/latest)
+[![Immich compatibility](https://img.shields.io/badge/Immich-v3%20only-4250AF?style=flat-square&logo=immich&logoColor=white)](https://immich.app/)
+<br>
+Hint: use `ghcr.io/demian98/immich-sftp-server:v1.0.1` for Immich v2.
+
 An **SFTP “bridge” for Immich**: browse your Immich albums like folders and upload/download photos & videos with an SFTP Client.
 
 ## Ideas to use this 💡
