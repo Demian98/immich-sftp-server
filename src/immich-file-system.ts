@@ -351,30 +351,64 @@ export class ImmichFileSystem implements VirtualFileSystem {
     }
 
     private async fetchAssetsForAlbum(album: ImmichAlbum): Promise<void> {
-        // Fetch assets
-        const response = await this.immichRequest({
-            method: 'GET',
-            endpoint: `albums/${album.id}`,
-            logAction: 'Assets in album',
-            skipResponseLog: true,
-        });
+        album.assets = await this.searchAssets(
+            {
+                albumIds: [album.id],
+            },
+            'Assets in album',
+        );
+    }
+    private async searchAssets(searchFilters: Record<string, unknown>, logAction: string): Promise<ImmichAsset[]> {
+        const assets: ImmichAsset[] = [];
+        let page = 1;
 
-        // Convert to ImmichAsset
-        album.assets = response.assets.map((asset: any): ImmichAsset => {
-            
-            if (!asset.exifInfo?.fileSizeInByte) {
-                console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);                
+        while (true) {
+            const response = await this.immichRequest({
+                method: 'POST',
+                endpoint: 'search/metadata',
+                data: JSON.stringify({
+                    ...searchFilters,
+                    withExif: true,
+                    page,
+                    size: 1000,
+                }),
+                logAction,
+                skipResponseLog: true,
+            });
+
+            const items = response?.assets?.items;
+            if (!Array.isArray(items)) {
+                throw new Error(`Invalid metadata search response for '${logAction}': assets.items is missing.`);
             }
 
-            return{
-                id: asset.id,
-                originalFileName: asset.originalFileName,
-                fileCreatedAt: asset.fileCreatedAt,
-                fileModifiedAt: asset.fileModifiedAt,
-                fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
-                isTrashed: asset.isTrashed,
+            assets.push(...items.map((asset: any): ImmichAsset => this.mapToImmichAsset(asset)));
+
+            const nextPageValue = response?.assets?.nextPage;
+            if (nextPageValue === null || nextPageValue === undefined) {
+                return assets;
             }
-        });
+
+            const nextPage = Number(nextPageValue);
+            if (!Number.isInteger(nextPage) || nextPage <= page) {
+                throw new Error(`Invalid metadata search response for '${logAction}': nextPage '${nextPageValue}' is invalid.`);
+            }
+
+            page = nextPage;
+        }
+    }
+    private mapToImmichAsset(asset: any): ImmichAsset {
+        if (!asset.exifInfo?.fileSizeInByte) {
+            console.warn(`Asset ${asset.originalFileName} (${asset.id}) has no exifInfo.fileSizeInByte, using 0 as fallback.`);
+        }
+
+        return {
+            id: asset.id,
+            originalFileName: asset.originalFileName,
+            fileCreatedAt: asset.fileCreatedAt,
+            fileModifiedAt: asset.fileModifiedAt,
+            fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
+            isTrashed: asset.isTrashed,
+        };
     }
     private extractPathInfo(filePath: string): { albumName: string; fileName: string | null } {
         // Entfernt führende und doppelte Slashes, z. B. aus "//Pflanzen/..." → "Pflanzen/..."
