@@ -1,6 +1,6 @@
 {
   "name": "immich-sftp-server",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Immich SFTP Server",
   "main": "sftp-server.js",
   "scripts": {
