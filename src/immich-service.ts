@@ -45,6 +45,10 @@ export class ImmichService {
 
     //Upload assets
     async uploadAsset(parsedPath: ParsedPath, filename: string, tmpFile: tmp.FileResult, mtime: number): Promise<void> {
+        const originalFileName = "fileName" in parsedPath ? parsedPath.fileName : null;
+        if (!originalFileName) {
+            throw new Error(`Invalid asset path for upload: ${filename}`);
+        }
         
         // Calculate SHA-1 checksum of the buffer
         const hash = crypto.createHash('sha1');
@@ -74,7 +78,7 @@ export class ImmichService {
         // If the asset doen't exist, upload it
         if (action == "accept") {
 
-            const uploadResponse = await this.createAsset(filename, tmpFile.name, mtime, album?.id);
+            const uploadResponse = await this.createAsset(originalFileName, tmpFile.name, mtime);
 
             // Close tmp file after successful upload
             tmpFile.removeCallback();
@@ -87,7 +91,7 @@ export class ImmichService {
         if (action == "reject" && isTrashed == true) {
 
             //Remove the trashed asset from other albums, in case it has some
-            const assigedAlbums = await this.fetchAlbumsForAssetId(assetId);
+            const assigedAlbums = await this.fetchAlbumsForAssetId(assetId, false);
             if (assigedAlbums && assigedAlbums.length > 0) {
                 for (const assigedAlbum of assigedAlbums) {
                     await this.removeAssetFromAlbum(assigedAlbum, assetId);
@@ -121,21 +125,17 @@ export class ImmichService {
             logAction: 'Bulk upload check'
         });
     }
-    private async createAsset(filename: string, tmpFilePath: string, mtime: number, albumId?: string): Promise<any> {
+    private async createAsset(originalFileName: string, tmpFilePath: string, mtime: number): Promise<any> {
         // Prepare form data
         const data = new FormData();
         const isoWithOffset = DateTime.fromSeconds(mtime, { zone: config.TZ }).toISO();
         data.append('fileModifiedAt', isoWithOffset);
         data.append('fileCreatedAt', isoWithOffset);
-        data.append('deviceAssetId', filename); // Use fileName as deviceAssetId
-        data.append('deviceId', 'immich-sftp-server');
-        if (albumId) {
-            data.append('albumId', albumId);
-        }
+        data.append('filename', originalFileName);
 
         // Add stream from tmp file
         const readStream = fs.createReadStream(tmpFilePath);
-        data.append('assetData', readStream, { filename: filename });
+        data.append('assetData', readStream, { filename: originalFileName });
 
         // Send the upload request to Immich
         return await this.immichRequest({
@@ -206,24 +206,32 @@ export class ImmichService {
         return album;
     }
     private async fetchAlbums(): Promise<ImmichAlbum[]> {
-
-        //Parameter "shaerd":
-        // - not set: All albums owned by me, also when shared with other users
-        // - false: only own albums, that are not shared with other users
-        // - true: only shared albums, own and from other users shared with me
-
-        // Fetch albums from Immich API
+        /*
+         * Immich v3 album filters:
+         *
+         * isOwned | isShared | Result
+         * --------|----------|--------------------------------------------------------
+         * —       | —        | All accessible albums (owned + shared-with-me)
+         * true    | —        | Only albums owned by the user
+         * false   | —        | Only albums shared with the user
+         * true    | true     | Owned albums that have been shared out
+         * true    | false    | Owned private albums
+         * —       | true     | All albums involving sharing
+         * —       | false    | Private albums only
+         * false   | true     | Albums shared with the user (same as isOwned=false)
+         * false   | false    | Empty (logically impossible)
+         */
         const response = await this.immichRequest({
             method: 'GET',
-            endpoint: 'albums',
+            endpoint: 'albums?isOwned=true',
             logAction: 'All own albums',
             skipResponseLog: true,
         });
 
-        //Process and filter albums
-        return this.filterAlbums(response);
+        // Only apply SFTP-specific filters to the albums exposed as folders.
+        return this.filterAlbumsForSftp(this.mapAlbums(response));
     }
-    private async fetchAlbumsForAssetId(assetId: string): Promise<ImmichAlbum[]> {
+    private async fetchAlbumsForAssetId(assetId: string, filterForSftp: boolean): Promise<ImmichAlbum[]> {
         // Check in which albums the asset is used
         const response = await this.immichRequest({
             method: 'GET',
@@ -232,17 +240,22 @@ export class ImmichService {
             skipResponseLog: true,
         });
 
-        //Process and filter albums
-        return this.filterAlbums(response);
+        // Filter only for SFTP if requested, otherwise return all albums for the asset.
+        // For exmaple in case of deletion, we need to know all albums the asset is in, not just the SFTP-visible ones.
+        if (filterForSftp) 
+            return this.filterAlbumsForSftp(this.mapAlbums(response));
+        else 
+            return this.mapAlbums(response);
     }
-    private filterAlbums(response: any) {
+    private mapAlbums(response: any): ImmichAlbum[] {
         // Map response to ImmichAlbum objects
-        const albums: ImmichAlbum[] = response.map((item: any): ImmichAlbum => ({
+        return response.map((item: any): ImmichAlbum => ({
             id: item.id,
             albumName: item.albumName,
             description: item.description,
         }));
-
+    }
+    private filterAlbumsForSftp(albums: ImmichAlbum[]): ImmichAlbum[] {
         //todo replace this method by filterFolderNames
 
         // Filter out albums with empty or invalid names
@@ -309,42 +322,59 @@ export class ImmichService {
         throw new Error(`Asset not found for path: ${JSON.stringify(parsedPath)}`);
     }
     private async fetchAssetsWithoutAlbum(): Promise<ImmichAsset[]> {
+        return await this.searchAssets(
+            {
+                isNotInAlbum: true,
+            },
+            'Assets without album',
+        );
+    }
+    private async fetchAssetsForAlbum(album: ImmichAlbum): Promise<void> {
+        album.assets = await this.searchAssets(
+            {
+                albumIds: [album.id],
+            },
+            'Assets in album',
+        );
+    }
+    private async searchAssets(searchFilters: Record<string, unknown>, logAction: string): Promise<ImmichAsset[]> {
         const assets: ImmichAsset[] = [];
         let page = 1;
 
-        do {
+        while (true) {
             const response = await this.immichRequest({
                 method: 'POST',
                 endpoint: 'search/metadata',
                 data: JSON.stringify({
-                    isNotInAlbum: true,
+                    ...searchFilters,
                     withExif: true,
-                    page: page,
+                    page,
                     size: 1000,
                 }),
-                logAction: 'Assets without album',
+                logAction,
                 skipResponseLog: true,
             });
 
-            const pageAssets = (response.assets?.items ?? []).map((asset: any): ImmichAsset => this.mapToImmichAsset(asset));
-            assets.push(...pageAssets);
-            page = Number(response.assets?.nextPage ?? 0);
-        } while (page > 0);
+            const items = response?.assets?.items;
+            if (!Array.isArray(items)) {
+                throw new Error(`Invalid metadata search response for '${logAction}': assets.items is missing.`);
+            }
 
-        return assets;
+            assets.push(...items.map((asset: any): ImmichAsset => this.mapToImmichAsset(asset)));
+
+            const nextPageValue = response?.assets?.nextPage;
+            if (nextPageValue === null || nextPageValue === undefined) {
+                return assets;
+            }
+
+            const nextPage = Number(nextPageValue);
+            if (!Number.isInteger(nextPage) || nextPage <= page) {
+                throw new Error(`Invalid metadata search response for '${logAction}': nextPage '${nextPageValue}' is invalid.`);
+            }
+
+            page = nextPage;
+        }
     }
-    private async fetchAssetsForAlbum(album: ImmichAlbum): Promise<void> {
-        // Fetch assets
-        const response = await this.immichRequest({
-            method: 'GET',
-            endpoint: `albums/${album.id}`,
-            logAction: 'Assets in album',
-            skipResponseLog: true,
-        });
-
-        // Convert to ImmichAsset
-        album.assets = response.assets.map((asset: any): ImmichAsset => this.mapToImmichAsset(asset));
-    }    
     private mapToImmichAsset(asset: any): ImmichAsset {
 
         if (!asset.exifInfo?.fileSizeInByte) {
@@ -358,7 +388,7 @@ export class ImmichService {
             fileModifiedAt: asset.fileModifiedAt,
             fileSizeInByte: asset.exifInfo?.fileSizeInByte ?? 0,
             isTrashed: asset.isTrashed,
-        }
+        };
     }
 
     //Maintain assets
@@ -373,13 +403,19 @@ export class ImmichService {
     }
     async deleteAsset(album: ImmichAlbum | null, asset: ImmichAsset): Promise<void> {
         // Check in which albums the asset is used
-        const albumsForAsset = await this.fetchAlbumsForAssetId(asset.id);
+        const albumsForAsset = await this.fetchAlbumsForAssetId(asset.id, false);
+        const isUsedInAnotherAlbum = album
+            ? albumsForAsset.some(assignedAlbum => assignedAlbum.id !== album.id)
+            : albumsForAsset.length > 0;
 
         // If the asset is in other albums
-        if (album && albumsForAsset && albumsForAsset.length > 1) {
+        if (album && isUsedInAnotherAlbum) {
 
             // Remove asset from album
             await this.removeAssetFromAlbum(album, asset.id);
+        }
+        else if (!album && isUsedInAnotherAlbum) {
+            throw new Error(`Asset ${asset.id} is no longer without an album and will not be deleted.`);
         }
         else {
             // Asset is used in only 1 or no album, delete it from Immich
