@@ -290,13 +290,21 @@ export class ImmichService {
             logAction: 'Delete album'
         });
     }
-    async createAlbum(albumName: string): Promise<void> {
+    async createAlbum(albumName: string, tagName?: string): Promise<void> {
         await this.immichRequest({
             method: 'POST',
             endpoint: 'albums',
-            data: JSON.stringify({ albumName: albumName }),
+            data: JSON.stringify({
+                albumName,
+
+                // Add the tag as description, if a tag is provided
+                ...(tagName === undefined ? {} : { description: `${this.tagPrefix}${tagName}` }),
+            }),
             logAction: 'Create album'
         });
+
+        // Clear cache to ensure the new album is available for subsequent operations in this session.
+        this.albumsCache = [];
     }
 
     //Get Assets

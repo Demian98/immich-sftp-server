@@ -184,14 +184,40 @@ export class ImmichFileSystem implements VirtualFileSystem {
 
     //Create album and Upload files
     async mkdir(path: string): Promise<void> {
-        // Only allow creation of folders at level 1 (e.g., "/MyAlbum")
-        const cleanedPath = path.replace(/^\/+|\/+$/g, ""); // Remove leading and trailing slashes
-        if (cleanedPath.includes("/")) {
-            throw new Error("Only top-level folders (albums) can be created.");
-        }
+        const parsedPath = this.parsePath(path);
 
-        // Create a new album in Immich
-        await this.immichService.createAlbum(cleanedPath);
+        switch (parsedPath.kind) {
+            case "album":
+                // Album are only allowed in the "all albums" or "untagged albums" virtual folders
+                if (parsedPath.virtualFolder !== this.allAlbumsFolder && parsedPath.virtualFolder !== this.untaggedAlbumsFolder) {
+                    throw new Error(`Albums cannot be created in virtual folder: ${parsedPath.virtualFolder}`);
+                }
+
+                //Create the album
+                await this.immichService.createAlbum(parsedPath.albumName);
+                return;
+
+            case "tagAlbum":
+                //Create the album with the tag
+                await this.immichService.createAlbum(
+                    parsedPath.albumName,
+                    parsedPath.tagName,
+                );
+                return;
+
+            case "root":
+            case "virtualFolder":
+            case "tag":
+            case "asset":
+            case "assetWithoutAlbum":
+            case "tagAsset":
+                throw new Error(`Album creation is not supported for path: ${path}`);
+
+            default: {
+                const _exhaustive: never = parsedPath;
+                throw new Error(`Unhandled ParsedPath kind: ${JSON.stringify(_exhaustive)}`);
+            }
+        }
     }
     async writeFile(filename: string, tmpFile: tmp.FileResult): Promise<void> {
         this.uploadQueue.push({ filename, tmpFile });
